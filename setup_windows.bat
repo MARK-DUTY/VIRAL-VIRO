@@ -32,8 +32,8 @@ if errorlevel 1 (
   echo  Intentare instalarlo con winget...
   winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements
   echo.
-  echo  Si winget fallo, instala FFmpeg manualmente:
-  echo  https://www.gyan.dev/ffmpeg/builds/  (ffmpeg-release-essentials.zip)
+  echo  Si winget fallo, instala FFmpeg manualmente desde:
+  echo  https://www.gyan.dev/ffmpeg/builds/   - archivo ffmpeg-release-essentials.zip
   echo  y agrega su carpeta "bin" al PATH. Luego vuelve a ejecutar este instalador.
   echo.
 ) else (
@@ -64,15 +64,16 @@ echo.
 
 REM --- 5) Crear archivo de configuracion .env --------------------------
 echo [5/5] Preparando el archivo de configuracion...
-if not exist .env (
-  copy config.example.env .env >nul
-  echo.
-  echo  Se creo el archivo .env
-  echo  AHORA debes abrirlo con el Bloc de notas y pegar tus claves de
-  echo  Groq y Pexels. Luego guarda el archivo.
-) else (
-  echo  Ya existe un archivo .env (no lo toco).
-)
+if exist .env goto env_listo
+copy config.example.env .env >nul
+echo.
+echo  Se creo el archivo .env
+echo  AHORA debes abrirlo con el Bloc de notas y pegar tus claves de
+echo  Groq y Pexels. Luego guarda el archivo.
+goto env_fin
+:env_listo
+echo  Ya existe un archivo .env. No lo modifico.
+:env_fin
 echo.
 echo ============================================================
 echo    INSTALACION TERMINADA
