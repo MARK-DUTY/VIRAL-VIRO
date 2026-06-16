@@ -116,3 +116,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
     return out_path
+
+
+
+def build_subtitles_from_text(
+    text: str,
+    duration: float,
+    out_path: Path,
+    style: SubtitleStyle | None = None,
+    video_w: int = 1080,
+    video_h: int = 1920,
+) -> Path | None:
+    """
+    Plan B de subtitulos: cuando Edge TTS NO devuelve los tiempos por palabra,
+    repartimos el texto de forma pareja a lo largo de la duracion del audio.
+
+    No queda tan perfectamente sincronizado como con los tiempos reales, pero
+    garantiza que el video SIEMPRE tenga subtitulos.
+    """
+    words_raw = (text or "").split()
+    if not words_raw or duration <= 0:
+        return None
+
+    per = duration / len(words_raw)
+    timings: list[WordTiming] = []
+    t = 0.0
+    for w in words_raw:
+        timings.append(WordTiming(word=w, start=round(t, 3), end=round(t + per, 3)))
+        t += per
+
+    return build_ass_subtitles(
+        timings, out_path, style=style, video_w=video_w, video_h=video_h
+    )

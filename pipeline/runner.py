@@ -23,8 +23,9 @@ from .assemble import build_video
 from .config import settings
 from .images import fetch_images
 from .script_gen import generate_script
-from .subtitles import SubtitleStyle, build_ass_subtitles
+from .subtitles import SubtitleStyle, build_ass_subtitles, build_subtitles_from_text
 from .voice import synthesize_voice
+from .assemble import probe_duration
 
 ProgressFn = Callable[[str, int], None]
 
@@ -100,12 +101,23 @@ def create_video_from_url(
     # 5) Subtitulos
     progress("Creando los subtitulos sincronizados...", 70)
     subs = None
+    sub_style = SubtitleStyle(name=subtitle_color, position=subtitle_position)
+    # Duracion real del audio (para repartir bien los subtitulos si hace falta)
+    real_duration = probe_duration(audio.audio_path) or audio.duration or float(duration)
+
     if audio.words:
-        subs = build_ass_subtitles(
-            audio.words,
-            job_dir / "subtitles.ass",
-            style=SubtitleStyle(name=subtitle_color, position=subtitle_position),
+        print(f"[subtitulos] {len(audio.words)} palabras con tiempos exactos de Edge TTS")
+        subs = build_ass_subtitles(audio.words, job_dir / "subtitles.ass", style=sub_style)
+    else:
+        print("[subtitulos] Edge TTS no dio tiempos por palabra -> usando Plan B (reparto por texto)")
+        subs = build_subtitles_from_text(
+            script.narration, real_duration, job_dir / "subtitles.ass", style=sub_style
         )
+
+    if subs:
+        print(f"[subtitulos] archivo creado correctamente: {subs}")
+    else:
+        print("[subtitulos] AVISO: no se pudieron generar subtitulos")
 
     # 6) Avatar (opcional)
     avatar_video = None
