@@ -13,20 +13,20 @@ echo.
 set BASE=https://raw.githubusercontent.com/MARK-DUTY/VIROFEED-PERSONAL/main
 
 echo Actualizando archivos...
-curl -s -o app.py %BASE%/app.py
-curl -s -o requirements.txt %BASE%/requirements.txt
-curl -s -o pipeline\article.py %BASE%/pipeline/article.py
-curl -s -o pipeline\assemble.py %BASE%/pipeline/assemble.py
-curl -s -o pipeline\avatar.py %BASE%/pipeline/avatar.py
-curl -s -o pipeline\config.py %BASE%/pipeline/config.py
-curl -s -o pipeline\images.py %BASE%/pipeline/images.py
-curl -s -o pipeline\runner.py %BASE%/pipeline/runner.py
-curl -s -o pipeline\script_gen.py %BASE%/pipeline/script_gen.py
-curl -s -o pipeline\subtitles.py %BASE%/pipeline/subtitles.py
-curl -s -o pipeline\voice.py %BASE%/pipeline/voice.py
-curl -s -o templates\index.html %BASE%/templates/index.html
-curl -s -o static\app.js %BASE%/static/app.js
-curl -s -o static\style.css %BASE%/static/style.css
+curl -fsS -o app.py %BASE%/app.py
+curl -fsS -o requirements.txt %BASE%/requirements.txt
+curl -fsS -o pipeline\article.py %BASE%/pipeline/article.py
+curl -fsS -o pipeline\assemble.py %BASE%/pipeline/assemble.py
+curl -fsS -o pipeline\avatar.py %BASE%/pipeline/avatar.py
+curl -fsS -o pipeline\config.py %BASE%/pipeline/config.py
+curl -fsS -o pipeline\images.py %BASE%/pipeline/images.py
+curl -fsS -o pipeline\runner.py %BASE%/pipeline/runner.py
+curl -fsS -o pipeline\script_gen.py %BASE%/pipeline/script_gen.py
+curl -fsS -o pipeline\subtitles.py %BASE%/pipeline/subtitles.py
+curl -fsS -o pipeline\voice.py %BASE%/pipeline/voice.py
+curl -fsS -o templates\index.html %BASE%/templates/index.html
+curl -fsS -o static\app.js %BASE%/static/app.js
+curl -fsS -o static\style.css %BASE%/static/style.css
 
 echo.
 echo ============================================================

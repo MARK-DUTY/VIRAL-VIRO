@@ -153,8 +153,9 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
+    print("  VERSION DEL CODIGO: 2 (subtitulos con Plan B)")
     print("  Abriendo en tu navegador: http://localhost:5000")
-    print("  (Para cerrar el programa, cierra esta ventana negra)")
+    print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)
     threading.Timer(1.5, _open_browser).start()
     app.run(host="127.0.0.1", port=5000, debug=False)
