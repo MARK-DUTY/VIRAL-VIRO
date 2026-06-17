@@ -146,8 +146,10 @@ function renderReview(review) {
     const i = parseInt(btn.dataset.i, 10);
     const act = btn.dataset.act;
     if (act === "ai") {
-      // "Regenerar IA" usa la misma fuente elegida (gemini si se eligio, si no pollinations)
-      const aiMode = imageSourceChosen === "gemini" ? "gemini" : "ai";
+      // "Regenerar IA" usa la misma fuente elegida (together/gemini si se eligio, si no pollinations)
+      let aiMode = "ai";
+      if (imageSourceChosen === "together") aiMode = "together";
+      else if (imageSourceChosen === "gemini") aiMode = "gemini";
       btn.addEventListener("click", () => regenerate(i, aiMode));
     } else if (act === "stock") {
       btn.addEventListener("click", () => regenerate(i, "stock"));
