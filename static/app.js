@@ -128,13 +128,18 @@ function renderReview(review) {
         <span class="scene-badge" id="badge-${scene.index}">${scene.source}</span>
         <div class="scene-loading hidden" id="loading-${scene.index}">Generando...</div>
       </div>
-      <p class="scene-text">${scene.index + 1}. ${escapeHtml(scene.text)}</p>
+      <label class="scene-label">🎬 Escena ${scene.index + 1} · Diálogo (lo que se narra)</label>
+      <textarea class="scene-dialogue" id="dialogue-${scene.index}" rows="3"
+        title="Edita lo que se dice en esta escena">${escapeHtml(scene.text)}</textarea>
+      <span class="scene-saved hidden" id="saved-${scene.index}">✔ Guardado</span>
+      <label class="scene-label">🖼️ Descripción de la imagen (en inglés)</label>
       <textarea class="scene-prompt" id="prompt-${scene.index}" rows="2"
         title="Descripcion de la imagen (puedes editarla)">${escapeHtml(scene.image_prompt)}</textarea>
       <div class="scene-actions">
         <button class="btn-mini" data-act="ai" data-i="${scene.index}">🎨 Regenerar IA</button>
         <button class="btn-mini" data-act="stock" data-i="${scene.index}">🔁 Foto real</button>
         <button class="btn-mini" data-act="upload" data-i="${scene.index}">⬆️ Subir</button>
+        <button class="btn-mini btn-danger" data-act="delete" data-i="${scene.index}">🗑️ Eliminar</button>
       </div>
       <input type="file" accept="image/*" class="hidden" id="file-${scene.index}">
     `;
@@ -155,7 +160,14 @@ function renderReview(review) {
       btn.addEventListener("click", () => regenerate(i, "stock"));
     } else if (act === "upload") {
       btn.addEventListener("click", () => $(`file-${i}`).click());
+    } else if (act === "delete") {
+      btn.addEventListener("click", () => deleteScene(i));
     }
+  });
+  // Guardar el dialogo automaticamente cuando el usuario termina de editar
+  grid.querySelectorAll(".scene-dialogue").forEach((ta) => {
+    const i = parseInt(ta.id.split("-")[1], 10);
+    ta.addEventListener("change", () => saveDialogue(i));
   });
   grid.querySelectorAll('input[type="file"]').forEach((inp) => {
     const i = parseInt(inp.id.split("-")[1], 10);
@@ -163,6 +175,46 @@ function renderReview(review) {
   });
 
   show(reviewCard);
+}
+
+// Guardar el dialogo editado de una escena
+async function saveDialogue(i) {
+  const text = $(`dialogue-${i}`).value.trim();
+  if (!text) return;
+  try {
+    const resp = await fetch("/api/update_scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, text }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert(data.error || "No se pudo guardar el dialogo"); return; }
+    const saved = $(`saved-${i}`);
+    if (saved) {
+      saved.classList.remove("hidden");
+      setTimeout(() => saved.classList.add("hidden"), 1500);
+    }
+  } catch (e) {
+    alert("Error al guardar el dialogo: " + e);
+  }
+}
+
+// Eliminar una escena completa (imagen + dialogo)
+async function deleteScene(i) {
+  if (!confirm("¿Eliminar esta escena por completo (imagen y dialogo)?")) return;
+  try {
+    const resp = await fetch("/api/delete_scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert(data.error || "No se pudo eliminar la escena"); return; }
+    // Re-dibujar la lista (los numeros de escena se reordenan)
+    renderReview(data.review);
+  } catch (e) {
+    alert("Error al eliminar la escena: " + e);
+  }
 }
 
 function setSceneLoading(i, on) {
