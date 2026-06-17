@@ -12,6 +12,7 @@ con lo que se esta narrando en cada momento.
 """
 from __future__ import annotations
 
+import base64
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from .script_gen import Scene
 PEXELS_SEARCH = "https://api.pexels.com/v1/search"
 PIXABAY_SEARCH = "https://pixabay.com/api/"
 POLLINATIONS = "https://image.pollinations.ai/prompt/"
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 _HEADERS = {"User-Agent": "ViroFeedPersonal/1.0"}
 
@@ -76,6 +78,59 @@ def generate_ai_image(prompt: str, dest: Path, seed: int | None = None) -> bool:
     query = urllib.parse.urlencode(params)
     url = f"{POLLINATIONS}{encoded}?{query}"
     return _download(url, dest, timeout=90)
+
+
+# --------------------------------------------------------------------------
+#  Generacion con Gemini "Nano Banana" (mas realista) - necesita GEMINI_API_KEY
+# --------------------------------------------------------------------------
+def generate_gemini_image(prompt: str, dest: Path, timeout: int = 120) -> bool:
+    """
+    Genera una imagen realista con Google Gemini (Nano Banana).
+    Devuelve True si se guardo la imagen correctamente.
+    """
+    key = settings.gemini_api_key
+    if not key:
+        print("[gemini] falta GEMINI_API_KEY en .env")
+        return False
+    clean = (prompt or "").strip()
+    if not clean:
+        return False
+
+    model = settings.gemini_image_model or "gemini-2.5-flash-image"
+    url = f"{GEMINI_BASE}/{model}:generateContent?key={key}"
+    full_prompt = (
+        "Generate a photorealistic, high-quality vertical 9:16 portrait image, "
+        "natural lighting, realistic, no text, no watermark. Scene: " + clean
+    )
+    body = {
+        "contents": [{"parts": [{"text": full_prompt}]}],
+        "generationConfig": {"responseModalities": ["IMAGE"]},
+    }
+    try:
+        resp = requests.post(url, json=body, timeout=timeout)
+        if resp.status_code >= 400:
+            print(f"[gemini] error {resp.status_code}: {resp.text[:200]}")
+            return False
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            print("[gemini] respuesta sin candidates")
+            return False
+        parts = candidates[0].get("content", {}).get("parts", [])
+        for p in parts:
+            inline = p.get("inlineData") or p.get("inline_data")
+            if inline and inline.get("data"):
+                raw = base64.b64decode(inline["data"])
+                dest.write_bytes(raw)
+                return dest.exists() and dest.stat().st_size > 2048
+        print("[gemini] la respuesta no traia imagen (posible limite o modelo distinto)")
+        return False
+    except requests.RequestException as exc:
+        print(f"[gemini] excepcion de red: {exc}")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        print(f"[gemini] excepcion: {exc}")
+        return False
 
 
 # --------------------------------------------------------------------------
@@ -147,26 +202,43 @@ def fetch_single_image(
     Consigue UNA sola imagen para una escena (se usa al REGENERAR una imagen
     que salio mal o no concuerda).
 
-    mode: "ai" (generar con IA) | "stock" (foto real) | "hybrid" (IA y si falla, stock)
+    mode: "gemini" | "ai" | "stock" | "hybrid"
     seed: cambia la semilla para que la IA genere una imagen DISTINTA cada vez.
     """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    used: set[str] = set()
+    return _make_one(image_prompt, keyword, dest, mode, used, seed)
+
+
+def _make_one(
+    image_prompt: str,
+    keyword: str,
+    dest: Path,
+    mode: str,
+    used_urls: set[str],
+    seed: int | None,
+) -> ImageResult | None:
+    """Logica compartida: genera/consigue UNA imagen segun la fuente elegida."""
     mode = (mode or "hybrid").lower()
 
-    # 1) Generar con IA
-    if mode in ("ai", "hybrid"):
+    # 1) Generadores de IA segun el modo
+    if mode == "gemini":
+        if generate_gemini_image(image_prompt, dest):
+            return ImageResult(path=dest, source="gemini", query=image_prompt)
+        # respaldo: IA gratis (pollinations)
+        if generate_ai_image(image_prompt, dest, seed=seed):
+            return ImageResult(path=dest, source="ai", query=image_prompt)
+    elif mode in ("ai", "hybrid"):
         if generate_ai_image(image_prompt, dest, seed=seed):
             return ImageResult(path=dest, source="ai", query=image_prompt)
 
-    # 2) Foto de stock
-    if mode in ("stock", "hybrid", "ai"):
-        used: set[str] = set()
-        src = _download_stock(keyword, dest, used)
-        if src is None and image_prompt:
-            src = _download_stock(image_prompt.split(",")[0], dest, used)
-        if src:
-            return ImageResult(path=dest, source=src, query=keyword)
+    # 2) Respaldo a foto de stock (sirve para todos los modos)
+    src = _download_stock(keyword, dest, used_urls)
+    if src is None and image_prompt:
+        src = _download_stock(image_prompt.split(",")[0], dest, used_urls)
+    if src:
+        return ImageResult(path=dest, source=src, query=keyword)
 
     return None
 
@@ -208,26 +280,15 @@ def fetch_scene_images(
 
     for i, scene in enumerate(scenes):
         dest = dest_dir / f"img_{i:02d}.jpg"
-        got: ImageResult | None = None
 
         if progress:
             progress(f"Imagen {i + 1} de {total}...", 58 + int(8 * (i / max(1, total))))
 
-        # 1) Intentar IA si corresponde
-        if source in ("ai", "hybrid"):
-            if generate_ai_image(scene.image_prompt, dest, seed=1000 + i):
-                got = ImageResult(path=dest, source="ai", query=scene.image_prompt)
+        got = _make_one(
+            scene.image_prompt, scene.keyword, dest, source, used_urls, seed=1000 + i
+        )
 
-        # 2) Intentar stock si no hay imagen aun (modo stock, o respaldo de hybrid/ai)
-        if got is None and (source in ("stock", "hybrid", "ai")):
-            src = _download_stock(scene.keyword, dest, used_urls)
-            if src is None:
-                # ultimo intento con un termino mas generico
-                src = _download_stock(scene.image_prompt.split(",")[0], dest, used_urls)
-            if src:
-                got = ImageResult(path=dest, source=src, query=scene.keyword)
-
-        # 3) Si aun no hay imagen, reutilizar la anterior (para no romper el video)
+        # Si no se consiguio imagen, reutilizar la anterior (para no romper el video)
         if got is None and results:
             prev = results[-1]
             try:

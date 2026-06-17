@@ -145,8 +145,12 @@ function renderReview(review) {
   grid.querySelectorAll(".btn-mini").forEach((btn) => {
     const i = parseInt(btn.dataset.i, 10);
     const act = btn.dataset.act;
-    if (act === "ai" || act === "stock") {
-      btn.addEventListener("click", () => regenerate(i, act));
+    if (act === "ai") {
+      // "Regenerar IA" usa la misma fuente elegida (gemini si se eligio, si no pollinations)
+      const aiMode = imageSourceChosen === "gemini" ? "gemini" : "ai";
+      btn.addEventListener("click", () => regenerate(i, aiMode));
+    } else if (act === "stock") {
+      btn.addEventListener("click", () => regenerate(i, "stock"));
     } else if (act === "upload") {
       btn.addEventListener("click", () => $(`file-${i}`).click());
     }
