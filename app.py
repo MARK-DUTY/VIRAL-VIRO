@@ -22,9 +22,11 @@ from werkzeug.utils import secure_filename
 from pipeline.config import settings
 from pipeline.runner import (
     assemble_prepared,
+    delete_scene,
     prepare_video,
     regenerate_scene_image,
     set_scene_image,
+    update_scene_text,
 )
 from pipeline.voice import list_spanish_voices
 
@@ -211,6 +213,47 @@ def api_upload_image():
 
 
 # --------------------------------------------------------------------------
+#  Editar el dialogo (texto narrado) de una escena
+# --------------------------------------------------------------------------
+@app.route("/api/update_scene", methods=["POST"])
+def api_update_scene():
+    data = request.get_json(force=True) or {}
+    job_id = data.get("job_id")
+    job = JOBS.get(job_id)
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        index = int(data.get("index"))
+        text = data.get("text") or ""
+        update_scene_text(job["prepared"], index, text)
+        job["review"] = _review_payload(job_id)
+        return jsonify({"ok": True, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
+#  Eliminar una escena completa (imagen + dialogo)
+# --------------------------------------------------------------------------
+@app.route("/api/delete_scene", methods=["POST"])
+def api_delete_scene():
+    data = request.get_json(force=True) or {}
+    job_id = data.get("job_id")
+    job = JOBS.get(job_id)
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        index = int(data.get("index"))
+        delete_scene(job["prepared"], index)
+        job["review"] = _review_payload(job_id)
+        return jsonify({"ok": True, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
 #  PASO 2: ensamblar el video final
 # --------------------------------------------------------------------------
 @app.route("/api/assemble", methods=["POST"])
@@ -321,7 +364,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 5 (FLUX realista - Together AI)")
+    print("  VERSION DEL CODIGO: 6 (Editor: dialogos + eliminar escenas)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)

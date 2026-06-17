@@ -55,6 +55,14 @@ class PreparedJob:
     titles: list[str] = field(default_factory=list)
     hashtags: list[str] = field(default_factory=list)
     image_source: str = "hybrid"
+    # Datos para poder REGENERAR la voz si el usuario edita los dialogos:
+    voice: str = "es-MX-JorgeNeural"
+    rate: str = "+0%"
+    synth_narration: str = ""           # narracion con la que se genero el audio actual
+
+    def current_narration(self) -> str:
+        """La narracion actual = union de los textos de las escenas (tras editar)."""
+        return " ".join(s.text for s in self.scenes if s.text.strip()).strip()
 
 
 @dataclass
@@ -142,6 +150,9 @@ def prepare_video(
         titles=script.titles,
         hashtags=script.hashtags,
         image_source=image_source,
+        voice=voice,
+        rate=rate,
+        synth_narration=script.narration,
     )
 
 
@@ -199,6 +210,41 @@ def set_scene_image(prepared: PreparedJob, index: int, image_path: Path, source:
 
 
 # ==========================================================================
+#  Editar el DIALOGO (texto narrado) de una escena
+# ==========================================================================
+def update_scene_text(prepared: PreparedJob, index: int, new_text: str) -> None:
+    """
+    Cambia el dialogo (lo que se narra) de una escena.
+
+    OJO: al cambiar el dialogo, la voz y los subtitulos quedaran desactualizados.
+    Por eso 'assemble_prepared' detecta el cambio y REGENERA la voz automaticamente
+    antes de armar el video, para que todo quede sincronizado.
+    """
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    text = (new_text or "").strip()
+    if not text:
+        raise ValueError("El dialogo no puede quedar vacio. Si no la quieres, elimina la escena.")
+    prepared.scenes[index].text = text
+    prepared.narration = prepared.current_narration()
+
+
+# ==========================================================================
+#  Eliminar una escena completa (su imagen + su dialogo)
+# ==========================================================================
+def delete_scene(prepared: PreparedJob, index: int) -> None:
+    """Quita por completo una escena (imagen y dialogo) del video."""
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    if len(prepared.scenes) <= 1:
+        raise ValueError("No puedes eliminar la unica escena que queda.")
+    prepared.scenes.pop(index)
+    if index < len(prepared.images):
+        prepared.images.pop(index)
+    prepared.narration = prepared.current_narration()
+
+
+# ==========================================================================
 #  PASO 2: ensamblar el video final con las imagenes ya aprobadas
 # ==========================================================================
 def assemble_prepared(
@@ -211,6 +257,21 @@ def assemble_prepared(
 ) -> VideoJobResult:
     cfg = settings
     job_dir = prepared.job_dir
+
+    # Si el usuario edito dialogos o elimino escenas, la narracion cambio:
+    # regeneramos la VOZ para que el audio y los subtitulos queden sincronizados.
+    current = prepared.current_narration()
+    if current and current != prepared.synth_narration:
+        progress("Regenerando la voz con tus cambios...", 15)
+        print("[voz] el dialogo cambio -> regenerando audio y tiempos")
+        audio = synthesize_voice(
+            current, voice=prepared.voice, rate=prepared.rate, out_path=job_dir / "voz.mp3"
+        )
+        prepared.audio_path = audio.audio_path
+        prepared.audio_words = audio.words
+        prepared.real_duration = probe_duration(audio.audio_path) or audio.duration or prepared.real_duration
+        prepared.narration = current
+        prepared.synth_narration = current
 
     # Subtitulos
     progress("Creando los subtitulos sincronizados...", 30)
