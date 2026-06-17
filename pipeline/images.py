@@ -2,8 +2,11 @@
 Paso 4 del pipeline: conseguir las IMAGENES de fondo del video.
 
 Tres fuentes posibles (se elige con IMAGE_SOURCE en .env o desde la interfaz):
+  - "together": genera imagenes con IA FLUX (Together AI). MAS REALISTA y gratis.
+                Necesita TOGETHER_API_KEY. Genera directo en vertical 9:16.
+  - "gemini" : genera con Google "Nano Banana" (necesita GEMINI_API_KEY).
   - "ai"     : genera imagenes con IA (Pollinations.ai) a partir de la
-               descripcion de cada escena. GRATIS y sin clave. Maxima concordancia.
+               descripcion de cada escena. GRATIS y sin clave.
   - "stock"  : busca fotos reales en Pexels / Pixabay por palabra clave.
   - "hybrid" : intenta IA y, si falla, usa stock (lo mejor de ambos).
 
@@ -27,11 +30,43 @@ PEXELS_SEARCH = "https://api.pexels.com/v1/search"
 PIXABAY_SEARCH = "https://pixabay.com/api/"
 POLLINATIONS = "https://image.pollinations.ai/prompt/"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+TOGETHER_IMAGES = "https://api.together.xyz/v1/images/generations"
 
 _HEADERS = {"User-Agent": "ViroFeedPersonal/1.0"}
 
 # Tamano de generacion IA (vertical 9:16). El ensamblaje luego lo ajusta a 1080x1920.
 _AI_W, _AI_H = 768, 1344
+
+# --------------------------------------------------------------------------
+#  Mejora de PROMPTS para realismo (evita manos/caras deformes)
+# --------------------------------------------------------------------------
+# Lista de "cosas a evitar" que causan las imagenes raras (dos cabezas, dedos de mas...).
+_NEGATIVE_PROMPT = (
+    "deformed, disfigured, extra limbs, extra arms, extra legs, extra fingers, "
+    "fused fingers, mutated hands, malformed hands, bad anatomy, bad proportions, "
+    "two heads, cloned face, long neck, blurry, low quality, lowres, jpeg artifacts, "
+    "watermark, text, logo, signature, cropped, out of frame, cartoon, 3d render, "
+    "cgi, illustration, painting, drawing"
+)
+
+# Frases que empujan hacia una FOTO realista de alta calidad.
+_REALISM_PREFIX = "Photorealistic editorial photograph, "
+_REALISM_SUFFIX = (
+    ", realistic natural lighting, sharp focus, high detail, 50mm lens, "
+    "professional news photography, vertical 9:16 composition, realistic anatomy"
+)
+
+
+def _enhance_for_realism(prompt: str) -> str:
+    """
+    Envuelve la descripcion de la escena con instrucciones que mejoran el
+    realismo y reducen los errores de anatomia. Se aplica a TODOS los motores
+    de IA (Pollinations, Together, etc.).
+    """
+    clean = (prompt or "").strip().rstrip(".")
+    if not clean:
+        return clean
+    return f"{_REALISM_PREFIX}{clean}{_REALISM_SUFFIX}"
 
 
 @dataclass
@@ -63,7 +98,7 @@ def _download(url: str, dest: Path, timeout: int = 60) -> bool:
 # --------------------------------------------------------------------------
 def generate_ai_image(prompt: str, dest: Path, seed: int | None = None) -> bool:
     """Genera una imagen con IA a partir de la descripcion. Devuelve True si ok."""
-    clean = prompt.strip()
+    clean = _enhance_for_realism(prompt)
     if not clean:
         return False
     encoded = urllib.parse.quote(clean, safe="")
@@ -71,6 +106,7 @@ def generate_ai_image(prompt: str, dest: Path, seed: int | None = None) -> bool:
         "width": _AI_W,
         "height": _AI_H,
         "nologo": "true",
+        "enhance": "true",   # mejora automatica del prompt -> mas calidad
         "model": "flux",
     }
     if seed is not None:
@@ -78,6 +114,69 @@ def generate_ai_image(prompt: str, dest: Path, seed: int | None = None) -> bool:
     query = urllib.parse.urlencode(params)
     url = f"{POLLINATIONS}{encoded}?{query}"
     return _download(url, dest, timeout=90)
+
+
+# --------------------------------------------------------------------------
+#  Generacion con Together AI (FLUX.1 schnell Free) - mas REALISTA, gratis
+#  Necesita TOGETHER_API_KEY. FLUX es el modelo #1 en realismo y genera
+#  directamente en vertical 9:16.
+# --------------------------------------------------------------------------
+def generate_together_image(prompt: str, dest: Path, seed: int | None = None, timeout: int = 120) -> bool:
+    """
+    Genera una imagen realista con Together AI usando FLUX.
+    Devuelve True si se guardo la imagen correctamente.
+    """
+    key = settings.together_api_key
+    if not key or key.startswith("PEGA_AQUI"):
+        print("[together] falta TOGETHER_API_KEY en .env")
+        return False
+    clean = _enhance_for_realism(prompt)
+    if not clean:
+        return False
+
+    model = settings.together_image_model or "black-forest-labs/FLUX.1-schnell-Free"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": model,
+        "prompt": clean,
+        "width": _AI_W,
+        "height": _AI_H,
+        "steps": 4,            # FLUX schnell rinde bien con pocos pasos (gratis: max 4)
+        "n": 1,
+        "response_format": "b64_json",
+    }
+    if seed is not None:
+        body["seed"] = seed
+    try:
+        resp = requests.post(TOGETHER_IMAGES, headers=headers, json=body, timeout=timeout)
+        if resp.status_code >= 400:
+            print(f"[together] error {resp.status_code}: {resp.text[:200]}")
+            return False
+        data = resp.json()
+        items = data.get("data") or []
+        if not items:
+            print("[together] respuesta sin imagenes")
+            return False
+        first = items[0]
+        # La respuesta puede venir como base64 (b64_json) o como una URL
+        b64 = first.get("b64_json")
+        if b64:
+            dest.write_bytes(base64.b64decode(b64))
+            return dest.exists() and dest.stat().st_size > 2048
+        url = first.get("url")
+        if url:
+            return _download(url, dest, timeout=timeout)
+        print("[together] la respuesta no traia imagen")
+        return False
+    except requests.RequestException as exc:
+        print(f"[together] excepcion de red: {exc}")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        print(f"[together] excepcion: {exc}")
+        return False
 
 
 # --------------------------------------------------------------------------
@@ -202,7 +301,7 @@ def fetch_single_image(
     Consigue UNA sola imagen para una escena (se usa al REGENERAR una imagen
     que salio mal o no concuerda).
 
-    mode: "gemini" | "ai" | "stock" | "hybrid"
+    mode: "together" | "gemini" | "ai" | "stock" | "hybrid"
     seed: cambia la semilla para que la IA genere una imagen DISTINTA cada vez.
     """
     dest = Path(dest)
@@ -223,7 +322,13 @@ def _make_one(
     mode = (mode or "hybrid").lower()
 
     # 1) Generadores de IA segun el modo
-    if mode == "gemini":
+    if mode == "together":
+        if generate_together_image(image_prompt, dest, seed=seed):
+            return ImageResult(path=dest, source="together", query=image_prompt)
+        # respaldo: IA gratis (pollinations)
+        if generate_ai_image(image_prompt, dest, seed=seed):
+            return ImageResult(path=dest, source="ai", query=image_prompt)
+    elif mode == "gemini":
         if generate_gemini_image(image_prompt, dest):
             return ImageResult(path=dest, source="gemini", query=image_prompt)
         # respaldo: IA gratis (pollinations)

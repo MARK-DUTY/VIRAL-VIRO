@@ -35,6 +35,8 @@ class Settings:
     pixabay_api_key: str = field(default_factory=lambda: os.getenv("PIXABAY_API_KEY", "").strip())
     gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", "").strip())
     gemini_image_model: str = field(default_factory=lambda: os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image").strip())
+    together_api_key: str = field(default_factory=lambda: os.getenv("TOGETHER_API_KEY", "").strip())
+    together_image_model: str = field(default_factory=lambda: os.getenv("TOGETHER_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell-Free").strip())
 
     # --- Voz ---
     tts_voice: str = field(default_factory=lambda: os.getenv("TTS_VOICE", "es-MX-JorgeNeural").strip())

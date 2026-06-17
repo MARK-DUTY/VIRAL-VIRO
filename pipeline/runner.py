@@ -159,7 +159,7 @@ def regenerate_scene_image(
     """
     Vuelve a generar/buscar la imagen de la escena `index`.
 
-    mode       : "ai" | "stock" | "hybrid"
+    mode       : "together" | "gemini" | "ai" | "stock" | "hybrid"
     new_prompt : si el usuario edito la descripcion visual, se usa esta
     attempt    : numero de intento (cambia la semilla para obtener algo distinto)
     """
