@@ -33,6 +33,7 @@ class Settings:
     groq_model: str = field(default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip())
     pexels_api_key: str = field(default_factory=lambda: os.getenv("PEXELS_API_KEY", "").strip())
     pixabay_api_key: str = field(default_factory=lambda: os.getenv("PIXABAY_API_KEY", "").strip())
+    unsplash_access_key: str = field(default_factory=lambda: os.getenv("UNSPLASH_ACCESS_KEY", "").strip())
     gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", "").strip())
     gemini_image_model: str = field(default_factory=lambda: os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image").strip())
     together_api_key: str = field(default_factory=lambda: os.getenv("TOGETHER_API_KEY", "").strip())
@@ -79,8 +80,8 @@ class Settings:
         missing = []
         if not self.groq_api_key or self.groq_api_key.startswith("PEGA_AQUI"):
             missing.append("GROQ_API_KEY")
-        if not self.pexels_api_key or self.pexels_api_key.startswith("PEGA_AQUI"):
-            missing.append("PEXELS_API_KEY")
+        # Las imagenes ya NO requieren Pexels obligatorio: Openverse funciona
+        # sin clave como respaldo. Pexels/Pixabay/Unsplash son opcionales.
         if self.avatar_enabled and not self.did_api_key:
             missing.append("DID_API_KEY (porque AVATAR_ENABLED=true)")
         return missing

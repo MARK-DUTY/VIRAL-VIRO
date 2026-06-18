@@ -28,6 +28,8 @@ from .script_gen import Scene
 
 PEXELS_SEARCH = "https://api.pexels.com/v1/search"
 PIXABAY_SEARCH = "https://pixabay.com/api/"
+UNSPLASH_SEARCH = "https://api.unsplash.com/search/photos"
+OPENVERSE_SEARCH = "https://api.openverse.org/v1/images/"
 POLLINATIONS = "https://image.pollinations.ai/prompt/"
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 TOGETHER_IMAGES = "https://api.together.xyz/v1/images/generations"
@@ -277,13 +279,59 @@ def _search_pixabay(query: str, want: int = 1) -> list[str]:
         return []
 
 
+def _search_unsplash(query: str, want: int = 1) -> list[str]:
+    """Busca fotos profesionales en Unsplash. Necesita UNSPLASH_ACCESS_KEY (gratis)."""
+    key = settings.unsplash_access_key
+    if not key or key.startswith("PEGA_AQUI"):
+        return []
+    headers = {"Authorization": f"Client-ID {key}", **_HEADERS}
+    params = {"query": query, "per_page": max(1, want * 3), "orientation": "portrait"}
+    try:
+        resp = requests.get(UNSPLASH_SEARCH, headers=headers, params=params, timeout=25)
+        if resp.status_code != 200:
+            return []
+        results = resp.json().get("results", [])
+        urls = []
+        for p in results:
+            u = p.get("urls", {})
+            url = u.get("regular") or u.get("full") or u.get("raw")
+            if url:
+                urls.append(url)
+        return urls
+    except requests.RequestException:
+        return []
+
+
+def _search_openverse(query: str, want: int = 1) -> list[str]:
+    """Busca en Openverse (700M+ imagenes). NO necesita clave (gratis)."""
+    params = {
+        "q": query,
+        "license_type": "commercial",   # solo imagenes de uso comercial
+        "aspect_ratio": "tall",         # verticales, para formato 9:16
+        "page_size": max(3, want * 3),
+    }
+    try:
+        resp = requests.get(OPENVERSE_SEARCH, headers=_HEADERS, params=params, timeout=25)
+        if resp.status_code != 200:
+            return []
+        results = resp.json().get("results", [])
+        return [r.get("url") for r in results if r.get("url")]
+    except requests.RequestException:
+        return []
+
+
 def _download_stock(query: str, dest: Path, used_urls: set[str]) -> str | None:
     """Intenta descargar una foto de stock para la query. Devuelve la fuente o None."""
-    candidates = _search_pexels(query) + _search_pixabay(query)
-    for url in candidates:
-        if url in used_urls:
+    # Mezclamos varias fuentes (mejores primero) para mas variedad y concordancia.
+    candidates = (
+        [(u, "pexels") for u in _search_pexels(query)]
+        + [(u, "unsplash") for u in _search_unsplash(query)]
+        + [(u, "pixabay") for u in _search_pixabay(query)]
+        + [(u, "openverse") for u in _search_openverse(query)]
+    )
+    for url, source in candidates:
+        if not url or url in used_urls:
             continue
-        source = "pexels" if "pexels" in url else "pixabay"
         if _download(url, dest):
             used_urls.add(url)
             return source
@@ -370,13 +418,13 @@ def fetch_scene_images(
     dest_dir.mkdir(parents=True, exist_ok=True)
     source = (source or "hybrid").lower()
 
-    # Validacion de claves para modos que usan stock
-    stock_available = (
-        settings.pexels_api_key and not settings.pexels_api_key.startswith("PEGA_AQUI")
-    ) or bool(settings.pixabay_api_key)
+    # Validacion de claves para modos que usan stock.
+    # Openverse NO necesita clave, asi que el stock SIEMPRE esta disponible;
+    # Pexels/Pixabay/Unsplash solo mejoran la variedad y calidad.
+    stock_available = True  # gracias a Openverse (sin clave)
     if source == "stock" and not stock_available:
         raise ValueError(
-            "Elegiste fotos de stock pero falta la clave de Pexels en tu .env."
+            "Elegiste fotos de stock pero no hay ninguna fuente disponible."
         )
 
     results: list[ImageResult] = []

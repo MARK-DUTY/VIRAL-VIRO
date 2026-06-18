@@ -100,7 +100,7 @@ def api_prepare():
 
     fresh = settings.reload()
     missing = fresh.missing_keys()
-    if "GROQ_API_KEY" in missing or any("PEXELS" in m for m in missing):
+    if "GROQ_API_KEY" in missing:
         return jsonify({"error": "Faltan claves en tu archivo .env: " + ", ".join(missing)}), 400
 
     job_id = uuid.uuid4().hex[:12]
@@ -364,7 +364,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 10 (Solo fotos reales: Pexels/Pixabay)")
+    print("  VERSION DEL CODIGO: 11 (4 fuentes de fotos: Pexels/Unsplash/Pixabay/Openverse)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)
