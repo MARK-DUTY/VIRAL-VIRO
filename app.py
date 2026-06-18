@@ -364,7 +364,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 9 (Voz automatica que rota en cada video)")
+    print("  VERSION DEL CODIGO: 10 (Solo fotos reales: Pexels/Pixabay)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)

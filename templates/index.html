@@ -93,11 +93,7 @@
         <label class="field">
           <span>Fuente de imagenes</span>
           <select id="image_source">
-            <option value="together" {% if defaults.image_source=='together' %}selected{% endif %}>⭐ Realista FLUX (Together AI)</option>
-            <option value="hybrid" {% if defaults.image_source=='hybrid' %}selected{% endif %}>Hibrido (IA + stock)</option>
-            <option value="gemini" {% if defaults.image_source=='gemini' %}selected{% endif %}>Realista (Gemini Nano Banana)</option>
-            <option value="ai" {% if defaults.image_source=='ai' %}selected{% endif %}>IA gratis (Pollinations)</option>
-            <option value="stock" {% if defaults.image_source=='stock' %}selected{% endif %}>Fotos reales (stock)</option>
+            <option value="stock" selected>Fotos reales (Pexels / Pixabay)</option>
           </select>
         </label>
       </div>

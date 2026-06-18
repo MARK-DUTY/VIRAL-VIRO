@@ -136,8 +136,7 @@ function renderReview(review) {
       <textarea class="scene-prompt" id="prompt-${scene.index}" rows="2"
         title="Descripcion de la imagen (puedes editarla)">${escapeHtml(scene.image_prompt)}</textarea>
       <div class="scene-actions">
-        <button class="btn-mini" data-act="ai" data-i="${scene.index}">🎨 Regenerar IA</button>
-        <button class="btn-mini" data-act="stock" data-i="${scene.index}">🔁 Foto real</button>
+        <button class="btn-mini" data-act="stock" data-i="${scene.index}">🔁 Otra foto</button>
         <button class="btn-mini" data-act="upload" data-i="${scene.index}">⬆️ Subir</button>
         <button class="btn-mini btn-danger" data-act="delete" data-i="${scene.index}">🗑️ Eliminar</button>
       </div>
@@ -150,13 +149,7 @@ function renderReview(review) {
   grid.querySelectorAll(".btn-mini").forEach((btn) => {
     const i = parseInt(btn.dataset.i, 10);
     const act = btn.dataset.act;
-    if (act === "ai") {
-      // "Regenerar IA" usa la misma fuente elegida (together/gemini si se eligio, si no pollinations)
-      let aiMode = "ai";
-      if (imageSourceChosen === "together") aiMode = "together";
-      else if (imageSourceChosen === "gemini") aiMode = "gemini";
-      btn.addEventListener("click", () => regenerate(i, aiMode));
-    } else if (act === "stock") {
+    if (act === "stock") {
       btn.addEventListener("click", () => regenerate(i, "stock"));
     } else if (act === "upload") {
       btn.addEventListener("click", () => $(`file-${i}`).click());
