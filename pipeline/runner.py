@@ -41,6 +41,42 @@ def _slugify(text: str, maxlen: int = 40) -> str:
     return (keep[:maxlen] or "video").strip("_")
 
 
+# Palabras que activan el modo "voz automatica" (rotacion)
+_RANDOM_VOICE_WORDS = {"random", "auto", "automatica", "automática", "aleatoria", "azar", ""}
+
+
+def _next_rotating_voice() -> str:
+    """
+    Devuelve la siguiente voz del grupo (rotando en cada llamada).
+    Guarda el indice en un archivito para que la rotacion continue aunque
+    se cierre y se vuelva a abrir el programa.
+
+    Ejemplo: video 1 -> voz 1, video 2 -> voz 2, ... y al llegar al final
+    vuelve a empezar.
+    """
+    pool = [v for v in settings.voice_pool if v] or ["es-MX-JorgeNeural"]
+    state_file = settings.work_dir / "voice_rotation.txt"
+    try:
+        idx = int(state_file.read_text(encoding="utf-8").strip())
+    except Exception:
+        idx = 0
+    voice = pool[idx % len(pool)]
+    try:
+        state_file.write_text(str((idx + 1) % 1_000_000), encoding="utf-8")
+    except Exception:
+        pass
+    print(f"[voz] modo automatico -> voz {idx % len(pool) + 1} de {len(pool)}: {voice}")
+    return voice
+
+
+def _resolve_voice(voice: str | None) -> str:
+    """Si el usuario pidio 'voz automatica', elige la siguiente del grupo."""
+    v = (voice or "").strip().lower()
+    if v in _RANDOM_VOICE_WORDS:
+        return _next_rotating_voice()
+    return voice  # type: ignore[return-value]
+
+
 @dataclass
 class PreparedJob:
     """Estado intermedio: todo listo menos el video final (a la espera de revision)."""
@@ -101,6 +137,7 @@ def prepare_video(
     cfg = settings
     duration = duration or cfg.video_duration
     voice = voice or cfg.tts_voice
+    voice = _resolve_voice(voice)   # si es "automatica", elige una del grupo (rotando)
     rate = rate if rate is not None else cfg.tts_rate
     style = style or cfg.script_style
     cta = cta or cfg.call_to_action

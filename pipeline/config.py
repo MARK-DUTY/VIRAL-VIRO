@@ -41,6 +41,15 @@ class Settings:
     # --- Voz ---
     tts_voice: str = field(default_factory=lambda: os.getenv("TTS_VOICE", "es-MX-JorgeNeural").strip())
     tts_rate: str = field(default_factory=lambda: os.getenv("TTS_RATE", "+8%").strip())
+    # Grupo de voces para el modo "voz automatica" (rotacion en cada video).
+    # Mezcla de hombres/mujeres y paises. Se puede personalizar con VOICE_POOL.
+    voice_pool: list[str] = field(default_factory=lambda: [
+        v.strip() for v in os.getenv(
+            "VOICE_POOL",
+            "es-MX-JorgeNeural,es-MX-DaliaNeural,es-ES-AlvaroNeural,"
+            "es-ES-ElviraNeural,es-CO-SalomeNeural",
+        ).split(",") if v.strip()
+    ])
 
     # --- Avatar ---
     avatar_enabled: bool = field(default_factory=lambda: _get_bool("AVATAR_ENABLED", False))

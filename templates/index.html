@@ -54,6 +54,7 @@
         <label class="field">
           <span>Voz</span>
           <select id="voice">
+            <option value="random" {% if defaults.voice in ['random','auto','automatica','aleatoria','azar'] %}selected{% endif %}>🎲 Voz automatica (cambia en cada video)</option>
             {% if voice_names %}
               {% for v in voice_names %}
                 <option value="{{ v }}" {% if v==defaults.voice %}selected{% endif %}>{{ v }}</option>
