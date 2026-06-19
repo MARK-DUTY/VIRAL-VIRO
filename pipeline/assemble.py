@@ -243,12 +243,17 @@ def build_video(
     if music_idx is not None:
         vol = max(0.0, min(1.0, float(music_volume)))
         fade_start = max(0.1, duration - 2.0)
-        # La musica va a bajo volumen con fade out; la voz se mantiene a tope.
+        # Igualamos frecuencia y canales de ambas pistas (si no, amix falla).
+        # La voz se mantiene a tope; la musica va baja, con fade out al final.
         filters.append(
-            f"[{music_idx}:a]volume={vol:.3f},afade=t=out:st={fade_start:.2f}:d=2[bgm]"
+            f"[1:a]aformat=sample_rates=44100:channel_layouts=stereo[voz]"
         )
         filters.append(
-            "[1:a][bgm]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[aout]"
+            f"[{music_idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,"
+            f"volume={vol:.3f},afade=t=out:st={fade_start:.2f}:d=2[bgm]"
+        )
+        filters.append(
+            "[voz][bgm]amix=inputs=2:duration=first:dropout_transition=3:normalize=0[aout]"
         )
         audio_map = "[aout]"
 

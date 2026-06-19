@@ -402,31 +402,31 @@ async function uploadImage(i, file) {
 }
 
 // ----------------------------------------------------------------------
-//  Musica de fondo (opcional)
+//  Musica de fondo (3 opciones: automatica / propia / sin musica)
 // ----------------------------------------------------------------------
+function currentMusicMode() {
+  const el = document.querySelector('input[name="music-mode"]:checked');
+  return el ? el.value : "auto";
+}
+
 function setupMusicControls() {
-  const enabled = $("music-enabled");
-  const controls = $("music-controls");
   const fileInput = $("music-file");
   const vol = $("music-volume");
   const volLabel = $("music-vol-label");
   const status = $("music-status");
+  const ownBox = $("music-own");
+  const volBox = $("music-vol-box");
 
-  enabled.addEventListener("change", async () => {
-    controls.classList.toggle("hidden", !enabled.checked);
-    if (!enabled.checked) {
-      // Quitar la musica del trabajo
-      fileInput.value = "";
-      status.textContent = "";
-      try {
-        await fetch("/api/remove_music", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ job_id: currentJob }),
-        });
-      } catch (e) { /* sin problema */ }
-    }
+  function refresh() {
+    const mode = currentMusicMode();
+    ownBox.classList.toggle("hidden", mode !== "own");
+    volBox.classList.toggle("hidden", mode === "off");
+  }
+
+  document.querySelectorAll('input[name="music-mode"]').forEach((r) => {
+    r.addEventListener("change", refresh);
   });
+  refresh();
 
   vol.addEventListener("input", () => { volLabel.textContent = vol.value + "%"; });
 
@@ -452,15 +452,27 @@ function setupMusicControls() {
 //  PASO 2: ensamblar el video final
 // ----------------------------------------------------------------------
 async function startAssemble() {
+  const mode = currentMusicMode();
+
+  // Si eligio su propia musica pero no subio archivo, avisamos
+  if (mode === "own") {
+    const status = $("music-status").textContent || "";
+    if (!status.startsWith("✔")) {
+      if (!confirm("Elegiste 'Mi propia música' pero no veo un archivo subido. Si continúas, el programa pondrá música automática. ¿Seguir así?")) {
+        return;
+      }
+    }
+  }
+
   progressTitle.textContent = "Generando el video final...";
   show(progressCard);
   setProgress(5, "Preparando ensamblaje...");
 
-  // Si el usuario activo la musica, mandamos el volumen elegido (0.0 a 1.0)
-  const payload = { job_id: currentJob };
-  if ($("music-enabled").checked) {
-    payload.music_volume = parseInt($("music-volume").value, 10) / 100;
-  }
+  const payload = {
+    job_id: currentJob,
+    music_mode: mode,
+    music_volume: parseInt($("music-volume").value, 10) / 100,
+  };
 
   try {
     const resp = await fetch("/api/assemble", {

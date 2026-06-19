@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import avatar as avatar_mod
+from . import music as music_mod
 from .article import extract_article
 from .assemble import build_video, probe_duration
 from .config import settings
@@ -409,6 +410,7 @@ def assemble_prepared(
     subtitle_color: str = "amarillo",
     subtitle_position: str = "center",
     use_avatar: bool = False,
+    music_mode: str = "auto",
     music_volume: float = 0.15,
     progress: ProgressFn = _noop,
 ) -> VideoJobResult:
@@ -456,6 +458,24 @@ def assemble_prepared(
     if len(img_durations) != len(prepared.images):
         img_durations = [prepared.real_duration / max(1, len(prepared.images))] * len(prepared.images)
 
+    # Musica de fondo segun el modo elegido:
+    #   "off"  -> sin musica
+    #   "own"  -> la que subio el usuario (si no hay, cae a automatica)
+    #   "auto" -> una pista automatica generada (100% libre de derechos)
+    mode = (music_mode or "auto").lower()
+    music_file: Path | None = None
+    if mode == "off":
+        music_file = None
+    elif mode == "own" and prepared.music_path and Path(prepared.music_path).exists():
+        music_file = Path(prepared.music_path)
+    else:
+        progress("Preparando la musica de fondo...", 70)
+        try:
+            music_file = music_mod.pick_auto_music()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[musica] no disponible: {exc}")
+            music_file = None
+
     # Ensamblar
     progress("Ensamblando el video final...", 75)
     logo = cfg.assets_dir / "logo.png"
@@ -471,7 +491,7 @@ def assemble_prepared(
         avatar_video=avatar_video,
         target_duration=prepared.real_duration,
         image_durations=img_durations,
-        music_path=prepared.music_path if prepared.music_path and Path(prepared.music_path).exists() else None,
+        music_path=music_file,
         music_volume=music_volume,
     )
 

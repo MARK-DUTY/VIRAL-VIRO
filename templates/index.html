@@ -163,18 +163,35 @@
       <p class="hint" id="dialogue-note">💡 Si editas algún diálogo o eliminas escenas, la voz y los subtítulos se regeneran solos al generar el video.</p>
       <div id="scenes-grid" class="scenes-grid"></div>
 
-      <!-- Musica de fondo (opcional) -->
+      <!-- Musica de fondo: 3 opciones -->
       <div class="music-box">
-        <label class="checkbox music-toggle">
-          <input type="checkbox" id="music-enabled">
-          <span>🎵 Agregar música de fondo (opcional)</span>
-        </label>
-        <div id="music-controls" class="music-controls hidden">
-          <p class="hint">Sube tu archivo de música. Lo más seguro contra derechos de autor: descárgala de la <strong>Biblioteca de audio de YouTube</strong> (YouTube Studio → Biblioteca de audio).</p>
+        <h3 class="music-title">🎵 Música de fondo</h3>
+        <div class="music-options">
+          <label class="music-radio">
+            <input type="radio" name="music-mode" value="auto" checked>
+            <span><strong>Automática</strong> · el programa le pone música (gratis y sin copyright)</span>
+          </label>
+          <label class="music-radio">
+            <input type="radio" name="music-mode" value="own">
+            <span><strong>Mi propia música</strong> · sube tu archivo</span>
+          </label>
+          <label class="music-radio">
+            <input type="radio" name="music-mode" value="off">
+            <span><strong>Sin música</strong> · el video va solo con la voz</span>
+          </label>
+        </div>
+
+        <!-- Subir musica propia (solo si elige "Mi propia musica") -->
+        <div id="music-own" class="music-extra hidden">
+          <p class="hint">Lo más seguro contra derechos de autor: descárgala de la <strong>Biblioteca de audio de YouTube</strong> (YouTube Studio → Biblioteca de audio).</p>
           <input type="file" accept="audio/*" id="music-file">
           <p class="music-status" id="music-status"></p>
+        </div>
+
+        <!-- Volumen (para automatica y propia) -->
+        <div id="music-vol-box" class="music-extra">
           <label class="field">
-            <span>Volumen de la música: <strong id="music-vol-label">15%</strong> (la voz siempre manda)</span>
+            <span>Volumen de la música: <strong id="music-vol-label">15%</strong> (la voz siempre se escucha por encima)</span>
             <input type="range" id="music-volume" min="2" max="40" value="15">
           </label>
         </div>

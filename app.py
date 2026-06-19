@@ -137,6 +137,8 @@ def api_prepare():
         "subtitle_color": data.get("subtitle_color") or "amarillo",
         "subtitle_position": data.get("subtitle_position") or "center",
         "use_avatar": bool(data.get("use_avatar", fresh.avatar_enabled)),
+        "music_mode": data.get("music_mode") or "auto",
+        "music_volume": float(data.get("music_volume") or 0.15),
     }
     JOBS[job_id] = {
         "status": "running", "phase": "preparing", "message": "Iniciando...",
@@ -202,6 +204,7 @@ def api_draft_story():
         "subtitle_color": data.get("subtitle_color") or "amarillo",
         "subtitle_position": data.get("subtitle_position") or "center",
         "use_avatar": bool(data.get("use_avatar", fresh.avatar_enabled)),
+        "music_mode": data.get("music_mode") or "auto",
         "music_volume": float(data.get("music_volume") or 0.15),
     }
     JOBS[job_id] = {
@@ -455,7 +458,9 @@ def api_assemble():
     if not job or not job.get("prepared"):
         return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
 
-    # Volumen de musica (si el usuario lo ajusto en la pantalla de revision)
+    # Modo y volumen de musica (ajustables en la pantalla de revision)
+    if data.get("music_mode"):
+        job["options"]["music_mode"] = data.get("music_mode")
     if data.get("music_volume") is not None:
         try:
             job["options"]["music_volume"] = float(data.get("music_volume"))
@@ -484,6 +489,7 @@ def _run_assemble(job_id: str) -> None:
             subtitle_color=options["subtitle_color"],
             subtitle_position=options["subtitle_position"],
             use_avatar=options["use_avatar"],
+            music_mode=options.get("music_mode", "auto"),
             music_volume=float(options.get("music_volume", 0.15)),
             progress=progress,
         )
@@ -564,7 +570,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 12 (Modo Historia + Musica de fondo opcional)")
+    print("  VERSION DEL CODIGO: 13 (Musica automatica libre + 3 opciones: dejar/cambiar/apagar)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)
