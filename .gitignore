@@ -10,6 +10,9 @@ __pycache__/
 output/
 work/
 
+# Musica de fondo generada automaticamente (se crea sola en tu PC)
+assets/music/
+
 # Fotos/logos personales del usuario
 assets/avatar.jpg
 assets/avatar.jpeg

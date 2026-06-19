@@ -20,6 +20,7 @@ curl -fsS -o pipeline\assemble.py %BASE%/pipeline/assemble.py
 curl -fsS -o pipeline\avatar.py %BASE%/pipeline/avatar.py
 curl -fsS -o pipeline\config.py %BASE%/pipeline/config.py
 curl -fsS -o pipeline\images.py %BASE%/pipeline/images.py
+curl -fsS -o pipeline\music.py %BASE%/pipeline/music.py
 curl -fsS -o pipeline\runner.py %BASE%/pipeline/runner.py
 curl -fsS -o pipeline\script_gen.py %BASE%/pipeline/script_gen.py
 curl -fsS -o pipeline\subtitles.py %BASE%/pipeline/subtitles.py
