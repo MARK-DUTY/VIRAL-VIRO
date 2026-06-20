@@ -1,0 +1,211 @@
+"""
+Lector de YouTube (Opcion 3 del programa).
+
+Saca el TEXTO de un video de YouTube (subtitulos + titulo + descripcion) y lo
+entrega como un `Article`, EXACTAMENTE igual que `article.py` hace con una
+noticia. Asi el resto del programa (guion, voz, imagenes, video) funciona sin
+ningun cambio: solo cambiamos de donde sale el texto.
+
+IMPORTANTE: este lector usa SOLO `requests` (que ya viene instalado). No hace
+falta instalar ninguna libreria nueva, asi el modo YouTube funciona sin que
+tengas que ejecutar comandos tecnicos.
+"""
+from __future__ import annotations
+
+import html as _html
+import json
+import re
+
+import requests
+
+from .article import Article
+
+# Cabecera para que YouTube nos responda como si fueramos un navegador normal.
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    # Cookie de consentimiento: evita la pantalla intermedia de cookies (Europa)
+    "Cookie": "CONSENT=YES+1",
+}
+
+
+def _clean(text: str) -> str:
+    """Limpia el texto: quita [Music], [Applause], saltos de linea y espacios dobles."""
+    text = _html.unescape(text or "")
+    text = re.sub(r"\[[^\]]{0,40}\]", " ", text)   # quitar [Music], [Applause], etc.
+    text = text.replace("\n", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _video_id(url: str) -> str:
+    """Saca el ID del video (11 caracteres) de cualquier forma de enlace de YouTube."""
+    url = (url or "").strip()
+    # youtu.be/VIDEOID
+    m = re.search(r"youtu\.be/([A-Za-z0-9_-]{11})", url)
+    if m:
+        return m.group(1)
+    # youtube.com/watch?v=VIDEOID
+    m = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", url)
+    if m:
+        return m.group(1)
+    # youtube.com/shorts/VIDEOID  |  /embed/VIDEOID  |  /live/VIDEOID  |  /v/VIDEOID
+    m = re.search(r"/(?:shorts|embed|live|v)/([A-Za-z0-9_-]{11})", url)
+    if m:
+        return m.group(1)
+    # por si pegan solo el ID
+    if re.fullmatch(r"[A-Za-z0-9_-]{11}", url):
+        return url
+    raise ValueError(
+        "No reconoci el enlace de YouTube. Pega el enlace completo del video, "
+        "por ejemplo: https://www.youtube.com/watch?v=XXXXXXXXXXX"
+    )
+
+
+def _find_json_object(text: str, marker: str) -> dict | None:
+    """
+    Busca `marker` dentro del HTML y extrae el objeto JSON {...} que viene
+    justo despues, contando llaves para tomar el objeto completo (sin libreria).
+    """
+    idx = text.find(marker)
+    if idx == -1:
+        return None
+    start = text.find("{", idx)
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    blob = text[start : i + 1]
+                    try:
+                        return json.loads(blob)
+                    except json.JSONDecodeError:
+                        return None
+    return None
+
+
+def _pick_caption_track(player: dict) -> dict | None:
+    """Elige la mejor pista de subtitulos: preferimos espanol y subtitulos manuales."""
+    try:
+        tracks = player["captions"]["playerCaptionsTracklistRenderer"]["captionTracks"]
+    except (KeyError, TypeError):
+        return None
+    if not tracks:
+        return None
+
+    def score(t: dict) -> tuple:
+        lang = (t.get("languageCode") or "").lower()
+        is_spanish = lang.startswith("es")
+        is_manual = t.get("kind") != "asr"   # "asr" = generado automaticamente
+        return (is_spanish, is_manual)
+
+    return sorted(tracks, key=score, reverse=True)[0]
+
+
+def _fetch_transcript(track: dict) -> str:
+    """Descarga y arma el texto de los subtitulos de la pista elegida."""
+    base = track.get("baseUrl")
+    if not base:
+        return ""
+
+    # Primero intentamos el formato json3 (facil de parsear).
+    sep = "&" if "?" in base else "?"
+    try:
+        resp = requests.get(base + sep + "fmt=json3", headers=_HEADERS, timeout=25)
+        resp.raise_for_status()
+        data = resp.json()
+        parts: list[str] = []
+        for event in data.get("events", []):
+            for seg in event.get("segs", []) or []:
+                piece = seg.get("utf8")
+                if piece:
+                    parts.append(piece)
+        text = _clean("".join(parts))
+        if text:
+            return text
+    except Exception:
+        pass
+
+    # Respaldo: el formato XML clasico con etiquetas <text>.
+    try:
+        resp = requests.get(base, headers=_HEADERS, timeout=25)
+        resp.raise_for_status()
+        chunks = re.findall(r"<text[^>]*>(.*?)</text>", resp.text, re.DOTALL)
+        clean_chunks = [re.sub(r"<[^>]+>", "", c) for c in chunks]
+        return _clean(" ".join(clean_chunks))
+    except Exception:
+        return ""
+
+
+def extract_youtube(url: str, timeout: int = 25) -> Article:
+    """
+    Lee un video de YouTube y devuelve un Article (url + titulo + texto).
+
+    El texto sale de los SUBTITULOS del video. Si el video no tiene subtitulos,
+    usamos su DESCRIPCION como respaldo. Lanza ValueError con un mensaje claro
+    si no hay suficiente texto para crear un guion.
+    """
+    vid = _video_id(url)
+    watch_url = f"https://www.youtube.com/watch?v={vid}&hl=es"
+
+    try:
+        resp = requests.get(watch_url, headers=_HEADERS, timeout=timeout)
+        resp.raise_for_status()
+        page = resp.text
+    except requests.RequestException as exc:
+        raise ValueError(
+            f"No pude abrir el video de YouTube. Revisa el enlace o tu internet. "
+            f"Detalle: {exc}"
+        ) from exc
+
+    title = ""
+    description = ""
+    transcript = ""
+
+    player = _find_json_object(page, "ytInitialPlayerResponse")
+    if player:
+        details = player.get("videoDetails") or {}
+        title = (details.get("title") or "").strip()
+        description = (details.get("shortDescription") or "").strip()
+        track = _pick_caption_track(player)
+        if track:
+            transcript = _fetch_transcript(track)
+
+    # Respaldo del titulo: la etiqueta <title> de la pagina
+    if not title:
+        m = re.search(r"<title[^>]*>(.*?)</title>", page, re.IGNORECASE | re.DOTALL)
+        if m:
+            title = re.sub(r"\s+", " ", m.group(1)).replace(" - YouTube", "").strip()
+    title = _clean(title) or "Video de YouTube"
+
+    # Texto base: preferimos los subtitulos; si no hay, la descripcion del video.
+    text = _clean(transcript or description)
+
+    article = Article(url=url, title=title, text=text)
+    if not article.is_usable:
+        raise ValueError(
+            "Pude abrir el video, pero no encontre subtitulos ni una descripcion "
+            "con suficiente texto. Prueba con un video que tenga subtitulos (la "
+            "mayoria los tienen) o cuya descripcion sea mas larga."
+        )
+    return article

@@ -25,6 +25,7 @@ curl -fsS -o pipeline\runner.py %BASE%/pipeline/runner.py
 curl -fsS -o pipeline\script_gen.py %BASE%/pipeline/script_gen.py
 curl -fsS -o pipeline\subtitles.py %BASE%/pipeline/subtitles.py
 curl -fsS -o pipeline\voice.py %BASE%/pipeline/voice.py
+curl -fsS -o pipeline\youtube.py %BASE%/pipeline/youtube.py
 curl -fsS -o templates\index.html %BASE%/templates/index.html
 curl -fsS -o static\app.js %BASE%/static/app.js
 curl -fsS -o static\style.css %BASE%/static/style.css

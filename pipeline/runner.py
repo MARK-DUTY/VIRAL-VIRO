@@ -200,6 +200,87 @@ def prepare_video(
 
 
 # ==========================================================================
+#  PASO 1 (YOUTUBE): preparar (subtitulos -> guion + voz + imagenes) a revisar
+# ==========================================================================
+def prepare_youtube(
+    url: str,
+    *,
+    duration: int | None = None,
+    style: str | None = None,
+    voice: str | None = None,
+    rate: str | None = None,
+    cta: str | None = None,
+    image_source: str | None = None,
+    progress: ProgressFn = _noop,
+) -> PreparedJob:
+    """
+    Igual que prepare_video, pero el texto sale de un VIDEO DE YOUTUBE (sus
+    subtitulos) en vez de una noticia. El resto del flujo es identico.
+    """
+    # Import "perezoso": asi runner.py se importa bien aunque youtube.py todavia
+    # no se haya descargado (la auto-reparacion de app.py lo trae al arrancar).
+    from .youtube import extract_youtube
+
+    cfg = settings
+    duration = duration or cfg.video_duration
+    voice = voice or cfg.tts_voice
+    voice = _resolve_voice(voice)   # si es "automatica", elige una del grupo (rotando)
+    rate = rate if rate is not None else cfg.tts_rate
+    style = style or cfg.script_style
+    cta = cta or cfg.call_to_action
+    image_source = (image_source or cfg.image_source or "hybrid").lower()
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    job_dir = cfg.work_dir / f"job_{stamp}"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    images_dir = job_dir / "images"
+
+    # 1) Leer los subtitulos del video de YouTube
+    progress("Leyendo los subtitulos del video de YouTube...", 8)
+    article = extract_youtube(url)
+
+    # 2) Guion en escenas (mismo motor que el modo noticia)
+    progress("Escribiendo el guion viral con IA...", 25)
+    script = generate_script(article, duration=duration, style=style, cta=cta)
+    print(f"[guion] {len(script.scenes)} escenas generadas (desde YouTube)")
+
+    # 3) Voz
+    progress("Generando la voz en espanol...", 45)
+    audio = synthesize_voice(
+        script.narration, voice=voice, rate=rate, out_path=job_dir / "voz.mp3"
+    )
+    real_duration = probe_duration(audio.audio_path) or audio.duration or float(duration)
+
+    # 4) Imagenes por escena
+    progress(f"Generando imagenes ({image_source})...", 60)
+    print(f"[imagenes] fuente: {image_source}")
+    images = fetch_scene_images(
+        script.scenes, images_dir, source=image_source, progress=progress
+    )
+    for im in images:
+        print(f"[imagenes] {im.source}: {im.query[:60]}")
+
+    progress("Listo para revisar imagenes!", 100)
+
+    return PreparedJob(
+        job_dir=job_dir,
+        title=article.title,
+        narration=script.narration,
+        scenes=script.scenes,
+        images=images,
+        audio_path=audio.audio_path,
+        audio_words=audio.words,
+        real_duration=real_duration,
+        titles=script.titles,
+        hashtags=script.hashtags,
+        image_source=image_source,
+        voice=voice,
+        rate=rate,
+        synth_narration=script.narration,
+    )
+
+
+# ==========================================================================
 #  MODO HISTORIA - PASO A: crear el BORRADOR (guion + prompts, SIN imagenes)
 # ==========================================================================
 def draft_story(
