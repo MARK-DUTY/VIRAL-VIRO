@@ -27,7 +27,7 @@ from werkzeug.utils import secure_filename
 #  archivo faltante.
 # --------------------------------------------------------------------------
 _RAW_BASE = "https://raw.githubusercontent.com/MARK-DUTY/VIROFEED-PERSONAL/main"
-_REQUIRED_FILES = ["pipeline/music.py"]
+_REQUIRED_FILES = ["pipeline/music.py", "pipeline/youtube.py"]
 
 
 def _self_repair() -> None:
@@ -55,6 +55,7 @@ from pipeline.runner import (
     draft_story,
     prepare_from_draft,
     prepare_video,
+    prepare_youtube,
     regenerate_scene_image,
     set_scene_image,
     update_scene_prompt,
@@ -186,6 +187,73 @@ def _run_prepare(job_id: str, url: str, options: dict) -> None:
 
     try:
         prepared = prepare_video(
+            url,
+            duration=options["duration"],
+            style=options["style"],
+            voice=options["voice"],
+            rate=options["rate"],
+            cta=options["cta"],
+            image_source=options["image_source"],
+            progress=progress,
+        )
+        JOBS[job_id]["prepared"] = prepared
+        JOBS[job_id]["phase"] = "review"
+        JOBS[job_id]["status"] = "ready"
+        JOBS[job_id]["percent"] = 100
+        JOBS[job_id]["message"] = "Listo para revisar"
+        JOBS[job_id]["review"] = _review_payload(job_id)
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        JOBS[job_id]["status"] = "error"
+        JOBS[job_id]["error"] = str(exc)
+
+
+# --------------------------------------------------------------------------
+#  PASO 1 (YOUTUBE): preparar desde un link de video de YouTube
+# --------------------------------------------------------------------------
+@app.route("/api/prepare_youtube", methods=["POST"])
+def api_prepare_youtube():
+    data = request.get_json(force=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "Pega el enlace de un video de YouTube primero."}), 400
+
+    fresh = settings.reload()
+    missing = fresh.missing_keys()
+    if "GROQ_API_KEY" in missing:
+        return jsonify({"error": "Faltan claves en tu archivo .env: " + ", ".join(missing)}), 400
+
+    job_id = uuid.uuid4().hex[:12]
+    options = {
+        "duration": int(data.get("duration") or fresh.video_duration),
+        "style": data.get("style") or fresh.script_style,
+        "voice": data.get("voice") or fresh.tts_voice,
+        "rate": data.get("rate") if data.get("rate") is not None else fresh.tts_rate,
+        "cta": data.get("cta") or fresh.call_to_action,
+        "image_source": data.get("image_source") or fresh.image_source,
+        "subtitle_color": data.get("subtitle_color") or "amarillo",
+        "subtitle_position": data.get("subtitle_position") or "center",
+        "use_avatar": bool(data.get("use_avatar", fresh.avatar_enabled)),
+        "music_mode": data.get("music_mode") or "auto",
+        "music_volume": float(data.get("music_volume") or 0.15),
+    }
+    JOBS[job_id] = {
+        "status": "running", "phase": "preparing", "message": "Iniciando...",
+        "percent": 0, "error": None, "prepared": None, "options": options,
+        "review": None, "result": None,
+    }
+
+    threading.Thread(target=_run_prepare_youtube, args=(job_id, url, options), daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+def _run_prepare_youtube(job_id: str, url: str, options: dict) -> None:
+    def progress(msg: str, pct: int) -> None:
+        JOBS[job_id]["message"] = msg
+        JOBS[job_id]["percent"] = pct
+
+    try:
+        prepared = prepare_youtube(
             url,
             duration=options["duration"],
             style=options["style"],

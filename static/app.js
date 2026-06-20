@@ -33,12 +33,14 @@ function switchTab(tab) {
   activeTab = tab;
   $("tab-btn-url").classList.toggle("active", tab === "url");
   $("tab-btn-story").classList.toggle("active", tab === "story");
+  $("tab-btn-youtube").classList.toggle("active", tab === "youtube");
   $("tab-url").classList.toggle("hidden", tab !== "url");
   $("tab-story").classList.toggle("hidden", tab !== "story");
-  // El estilo de guion solo aplica al modo noticia
-  $("style-field").style.display = tab === "url" ? "" : "none";
+  $("tab-youtube").classList.toggle("hidden", tab !== "youtube");
+  // El estilo de guion aplica a Noticia y a YouTube (no al modo Historia)
+  $("style-field").style.display = tab === "story" ? "none" : "";
   // El boton cambia segun el modo
-  generateBtn.textContent = tab === "url" ? "🎬 Preparar video" : "✍️ Generar guion y prompts";
+  generateBtn.textContent = tab === "story" ? "✍️ Generar guion y prompts" : "🎬 Preparar video";
 }
 
 function setProgress(pct, msg) {
@@ -65,6 +67,8 @@ function sharedOptions() {
 function onGenerate() {
   if (activeTab === "story") {
     startDraft();
+  } else if (activeTab === "youtube") {
+    startYoutube();
   } else {
     startPrepare();
   }
@@ -103,8 +107,36 @@ async function startPrepare() {
 }
 
 // ----------------------------------------------------------------------
-//  MODO HISTORIA - PASO A: crear el borrador (guion + prompts)
+//  PASO 1 (YOUTUBE): preparar desde un link de video de YouTube
 // ----------------------------------------------------------------------
+async function startYoutube() {
+  const url = $("youtube_url").value.trim();
+  if (!url) {
+    alert("Pega el enlace de un video de YouTube primero.");
+    return;
+  }
+
+  const payload = { url, ...sharedOptions() };
+
+  generateBtn.disabled = true;
+  progressTitle.textContent = "Leyendo el video de YouTube...";
+  show(progressCard);
+  setProgress(3, "Iniciando...");
+
+  try {
+    const resp = await fetch("/api/prepare_youtube", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showError(data.error || "Error desconocido"); return; }
+    currentJob = data.job_id;
+    pollStatus();
+  } catch (e) {
+    showError("No pude contactar al programa. ¿Sigue abierta la ventana negra?\n" + e);
+  }
+}
 async function startDraft() {
   const story = $("story").value.trim();
   if (story.length < 30) {
@@ -526,6 +558,7 @@ function escapeHtml(s) {
 // ----------------------------------------------------------------------
 $("tab-btn-url").addEventListener("click", () => switchTab("url"));
 $("tab-btn-story").addEventListener("click", () => switchTab("story"));
+$("tab-btn-youtube").addEventListener("click", () => switchTab("youtube"));
 
 generateBtn.addEventListener("click", onGenerate);
 assembleBtn.addEventListener("click", startAssemble);

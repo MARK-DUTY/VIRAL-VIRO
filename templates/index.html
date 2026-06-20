@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>🎬 ViroFeed <span>AI Personal</span></h1>
-    <p class="subtitle">Crea un video viral desde una noticia (URL) o desde tu propia historia</p>
+    <p class="subtitle">Crea un video viral desde una noticia (URL), tu propia historia o un video de YouTube</p>
   </header>
 
   {% if missing_keys %}
@@ -29,6 +29,7 @@
       <div class="tabs">
         <button class="tab active" id="tab-btn-url" data-tab="url">📰 Noticia (URL)</button>
         <button class="tab" id="tab-btn-story" data-tab="story">✍️ Mi historia</button>
+        <button class="tab" id="tab-btn-youtube" data-tab="youtube">🎬 Video de YouTube</button>
       </div>
 
       <!-- Panel: URL -->
@@ -55,6 +56,15 @@
         </label>
       </div>
 
+      <!-- Panel: Video de YouTube -->
+      <div class="tab-panel hidden" id="tab-youtube">
+        <label class="field">
+          <span>Enlace del video de YouTube</span>
+          <input type="url" id="youtube_url" placeholder="https://www.youtube.com/watch?v=...">
+        </label>
+        <p class="hint">El programa leerá los <strong>subtítulos</strong> del video para crear el guion (la mayoría de los videos tienen subtítulos). Si el video no tiene, usará su descripción.</p>
+      </div>
+
       <div class="row">
         <label class="field">
           <span>Duracion</span>
@@ -66,7 +76,7 @@
         </label>
 
         <label class="field" id="style-field">
-          <span>Estilo del guion (solo noticia)</span>
+          <span>Estilo del guion (noticia y YouTube)</span>
           <select id="style">
             <option value="breaking" {% if defaults.style=='breaking' %}selected{% endif %}>Ultimo minuto</option>
             <option value="resumen" {% if defaults.style=='resumen' %}selected{% endif %}>Resumen rapido</option>
