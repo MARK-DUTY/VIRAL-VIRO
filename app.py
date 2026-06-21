@@ -117,6 +117,8 @@ def _review_payload(job_id: str) -> dict:
         "titles": prepared.titles,
         "hashtags": prepared.hashtags,
         "duration": round(prepared.real_duration, 1),
+        "use_avatar": bool(job["options"].get("use_avatar", False)),
+        "voice": prepared.voice,
         "scenes": scenes,
     }
 
@@ -564,6 +566,12 @@ def api_assemble():
         except (TypeError, ValueError):
             pass
 
+    # Voz y avatar (ahora tambien se pueden cambiar en la pantalla de revision)
+    # voice == "" significa "mantener la voz actual" (no regenerar).
+    job["options"]["override_voice"] = (data.get("voice") or "").strip()
+    if "use_avatar" in data:
+        job["options"]["use_avatar"] = bool(data.get("use_avatar"))
+
     job["phase"] = "assembling"
     job["status"] = "running"
     job["percent"] = 0
@@ -586,6 +594,7 @@ def _run_assemble(job_id: str) -> None:
             subtitle_color=options["subtitle_color"],
             subtitle_position=options["subtitle_position"],
             use_avatar=options["use_avatar"],
+            voice=options.get("override_voice") or None,
             music_mode=options.get("music_mode", "auto"),
             music_volume=float(options.get("music_volume", 0.15)),
             progress=progress,
@@ -667,7 +676,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 14 (auto-reparacion de archivos faltantes + musica)")
+    print("  VERSION DEL CODIGO: 15 (musica confiable + voz/avatar en revision)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)

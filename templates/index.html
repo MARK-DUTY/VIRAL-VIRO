@@ -173,6 +173,26 @@
       <p class="hint" id="dialogue-note">💡 Si editas algún diálogo o eliminas escenas, la voz y los subtítulos se regeneran solos al generar el video.</p>
       <div id="scenes-grid" class="scenes-grid"></div>
 
+      <!-- Voz y avatar: se pueden cambiar aqui mismo, antes de armar el video -->
+      <div class="music-box">
+        <h3 class="music-title">🎙️ Voz y avatar</h3>
+        <label class="field">
+          <span>Voz de la narración</span>
+          <select id="review-voice">
+            <option value="" selected>✅ Mantener la voz actual</option>
+            <option value="hombre">👨 Voz de hombre</option>
+            <option value="mujer">👩 Voz de mujer</option>
+            <option value="random">🎲 Automática (alterna en cada video)</option>
+          </select>
+        </label>
+        <p class="hint">Si cambias la voz, se vuelve a generar al armar el video (tarda unos segundos más).</p>
+
+        <label class="music-radio" style="margin-top:10px;">
+          <input type="checkbox" id="review-avatar">
+          <span><strong>🧑 Avatar hablando (ON/OFF)</strong> · usa tus créditos gratis de la nube (D-ID). El programa usa la foto que combina con la voz: <code>avatar_hombre.jpg</code> o <code>avatar_mujer.jpg</code> (o <code>avatar.jpg</code> si solo tienes una).</span>
+        </label>
+      </div>
+
       <!-- Musica de fondo: 3 opciones -->
       <div class="music-box">
         <h3 class="music-title">🎵 Música de fondo</h3>

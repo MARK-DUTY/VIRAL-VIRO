@@ -1,14 +1,24 @@
 CARPETA DE RECURSOS (assets)
 ============================
 
-Aqui puedes poner 2 archivos OPCIONALES:
+Aqui puedes poner fotos OPCIONALES para el avatar y tu logo:
 
-1) avatar.jpg
-   - Una foto tuya con la cara visible y bien iluminada.
-   - SOLO se usa si activas el avatar (interruptor "Avatar hablando").
-   - Formato recomendado: foto vertical, fondo simple.
+1) FOTOS DEL AVATAR (solo se usan si enciendes el "Avatar hablando")
+   El programa escoge solita la foto que combina con la voz que elegiste:
 
-2) logo.png
+   - avatar_hombre.jpg  -> se usa cuando la voz es de HOMBRE
+   - avatar_mujer.jpg   -> se usa cuando la voz es de MUJER
+   - avatar.jpg         -> foto unica de respaldo (si no pones las dos de arriba)
+
+   Recomendaciones para la foto:
+   - Cara bien visible y DE FRENTE, mirando a la camara.
+   - De los hombros para arriba (no solo la cara recortada, ni cuerpo completo).
+   - Buena luz y fondo simple. Foto vertical de preferencia.
+
+   Si NO pones ninguna foto y enciendes el avatar, el programa te avisara que
+   falta la foto. En modo faceless (avatar apagado) no hace falta ninguna.
+
+2) logo.png  (opcional)
    - Tu logo o marca de agua, con fondo TRANSPARENTE (png).
    - Si lo pones aqui, aparecera en la esquina de todos los videos.
    - Si no pones nada, los videos saldran sin logo (perfecto tambien).
