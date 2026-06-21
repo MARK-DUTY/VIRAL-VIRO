@@ -48,6 +48,48 @@ def _slugify(text: str, maxlen: int = 40) -> str:
 # Palabras que activan el modo "voz automatica" (rotacion)
 _RANDOM_VOICE_WORDS = {"random", "auto", "automatica", "automática", "aleatoria", "azar", ""}
 
+# Atajos para elegir simplemente "voz de hombre" o "voz de mujer" desde la
+# pantalla de revision (sin tener que conocer el nombre exacto de la voz).
+_MALE_WORDS = {"hombre", "masculino", "man", "male", "h"}
+_FEMALE_WORDS = {"mujer", "femenino", "woman", "female", "m"}
+DEFAULT_MALE_VOICE = "es-MX-JorgeNeural"
+DEFAULT_FEMALE_VOICE = "es-MX-DaliaNeural"
+
+# Nombres comunes de voces FEMENINAS en espanol de Edge TTS. Sirve para saber,
+# a partir del nombre de la voz, si debemos usar la foto de mujer o de hombre.
+_FEMALE_VOICE_NAMES = {
+    "dalia", "elvira", "salome", "paloma", "larissa", "ximena", "sabina",
+    "tania", "marisol", "yolanda", "nuria", "renata", "emilia", "julia",
+    "camila", "valentina", "abril", "luciana", "catalina", "amanda",
+    "estrella", "vera", "marta", "irene",
+}
+
+
+def _voice_is_female(voice: str | None) -> bool:
+    """Adivina si una voz es femenina por su nombre (para escoger la foto)."""
+    name = (voice or "").lower()
+    return any(fn in name for fn in _FEMALE_VOICE_NAMES)
+
+
+def _pick_avatar_face(assets_dir: Path, voice: str | None) -> Path:
+    """
+    Elige la FOTO del avatar que combina con la voz:
+      - voz de mujer  -> assets/avatar_mujer.jpg  (o .png)
+      - voz de hombre -> assets/avatar_hombre.jpg (o .png)
+    Si no existe la foto por genero, usa assets/avatar.jpg como respaldo.
+    """
+    if _voice_is_female(voice):
+        candidates = ["avatar_mujer.jpg", "avatar_mujer.png", "avatar.jpg", "avatar.png"]
+    else:
+        candidates = ["avatar_hombre.jpg", "avatar_hombre.png", "avatar.jpg", "avatar.png"]
+    for name in candidates:
+        p = assets_dir / name
+        if p.exists():
+            return p
+    # No encontramos ninguna; devolvemos la ruta por defecto para que el avatar
+    # muestre un mensaje claro de "falta assets/avatar.jpg".
+    return assets_dir / "avatar.jpg"
+
 
 def _next_rotating_voice() -> str:
     """
@@ -74,10 +116,15 @@ def _next_rotating_voice() -> str:
 
 
 def _resolve_voice(voice: str | None) -> str:
-    """Si el usuario pidio 'voz automatica', elige la siguiente del grupo."""
+    """Si el usuario pidio 'voz automatica', elige la siguiente del grupo.
+    Tambien entiende los atajos 'hombre' y 'mujer'."""
     v = (voice or "").strip().lower()
     if v in _RANDOM_VOICE_WORDS:
         return _next_rotating_voice()
+    if v in _MALE_WORDS:
+        return DEFAULT_MALE_VOICE
+    if v in _FEMALE_WORDS:
+        return DEFAULT_FEMALE_VOICE
     return voice  # type: ignore[return-value]
 
 
@@ -494,6 +541,7 @@ def assemble_prepared(
     subtitle_color: str = "amarillo",
     subtitle_position: str = "center",
     use_avatar: bool = False,
+    voice: str | None = None,
     music_mode: str = "auto",
     music_volume: float = 0.15,
     progress: ProgressFn = _noop,
@@ -501,20 +549,34 @@ def assemble_prepared(
     cfg = settings
     job_dir = prepared.job_dir
 
+    # ¿El usuario eligio una voz distinta en la pantalla de revision?
+    # (puede ser "hombre", "mujer", "automatica" o un nombre de voz concreto)
+    desired_voice = _resolve_voice(voice) if voice else None
+    voice_changed = desired_voice is not None and desired_voice != prepared.voice
+
     # Si el usuario edito dialogos o elimino escenas, la narracion cambio:
     # regeneramos la VOZ para que el audio y los subtitulos queden sincronizados.
     current = prepared.current_narration()
-    if current and current != prepared.synth_narration:
-        progress("Regenerando la voz con tus cambios...", 15)
-        print("[voz] el dialogo cambio -> regenerando audio y tiempos")
+    narration_changed = bool(current) and current != prepared.synth_narration
+
+    if voice_changed or narration_changed or prepared.audio_path is None:
+        if voice_changed:
+            prepared.voice = desired_voice  # type: ignore[assignment]
+            print(f"[voz] el usuario cambio la voz -> {prepared.voice}")
+        # Texto a narrar: el actual si cambio; si no, el mismo de antes.
+        text_for_voice = current if narration_changed else (prepared.synth_narration or current)
+        if not text_for_voice:
+            text_for_voice = prepared.narration
+        progress("Regenerando la voz...", 15)
+        print("[voz] generando audio y tiempos")
         audio = synthesize_voice(
-            current, voice=prepared.voice, rate=prepared.rate, out_path=job_dir / "voz.mp3"
+            text_for_voice, voice=prepared.voice, rate=prepared.rate, out_path=job_dir / "voz.mp3"
         )
         prepared.audio_path = audio.audio_path
         prepared.audio_words = audio.words
         prepared.real_duration = probe_duration(audio.audio_path) or audio.duration or prepared.real_duration
-        prepared.narration = current
-        prepared.synth_narration = current
+        prepared.narration = text_for_voice
+        prepared.synth_narration = text_for_voice
 
     # Subtitulos
     progress("Creando los subtitulos sincronizados...", 30)
@@ -532,7 +594,8 @@ def assemble_prepared(
     avatar_video = None
     if use_avatar:
         progress("Generando el avatar en la nube...", 55)
-        face = cfg.assets_dir / "avatar.jpg"
+        face = _pick_avatar_face(cfg.assets_dir, prepared.voice)
+        print(f"[avatar] usando foto: {face.name}")
         avatar_video = avatar_mod.generate_avatar_video(
             prepared.audio_path, face, job_dir / "avatar.mp4"
         )

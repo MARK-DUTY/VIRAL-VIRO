@@ -294,6 +294,10 @@ function renderReview(review) {
   const grid = $("scenes-grid");
   grid.innerHTML = "";
 
+  // Inicializar los controles de voz y avatar segun el estado actual del trabajo
+  if ($("review-avatar")) $("review-avatar").checked = !!review.use_avatar;
+  if ($("review-voice")) $("review-voice").value = "";  // por defecto: mantener la voz actual
+
   review.scenes.forEach((scene) => {
     const card = document.createElement("div");
     card.className = "scene-card";
@@ -504,6 +508,8 @@ async function startAssemble() {
     job_id: currentJob,
     music_mode: mode,
     music_volume: parseInt($("music-volume").value, 10) / 100,
+    voice: $("review-voice") ? $("review-voice").value : "",
+    use_avatar: $("review-avatar") ? $("review-avatar").checked : false,
   };
 
   try {
