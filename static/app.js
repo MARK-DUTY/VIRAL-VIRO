@@ -19,6 +19,7 @@ let pollTimer = null;
 let currentJob = null;       // job_id actual
 let imageSourceChosen = "hybrid";
 let activeTab = "url";        // "url" | "story"
+let currentSceneCount = 0;    // cuantas escenas hay ahora (para "agregar escena")
 const attempts = {};          // cuenta de regeneraciones por escena
 
 function show(card) {
@@ -316,6 +317,8 @@ function imgUrl(file) {
 function renderReview(review) {
   generateBtn.disabled = false;
   showWarning("review-warning", review.warning);
+  currentSceneCount = review.scenes.length;   // para el selector de "agregar escena"
+  resetAddSceneForm();
   const grid = $("scenes-grid");
   grid.innerHTML = "";
 
@@ -431,6 +434,93 @@ async function deleteScene(i) {
     renderReview(data.review);
   } catch (e) {
     alert("Error al eliminar la escena: " + e);
+  }
+}
+
+// ----------------------------------------------------------------------
+//  Agregar una escena NUEVA (dialogo + imagen/video)
+// ----------------------------------------------------------------------
+function resetAddSceneForm() {
+  const form = $("add-scene-form");
+  if (form) form.classList.add("hidden");
+  if ($("add-scene-text")) $("add-scene-text").value = "";
+  if ($("add-scene-desc")) $("add-scene-desc").value = "";
+  if ($("add-scene-status")) $("add-scene-status").textContent = "";
+}
+
+// Llena el menu de "¿donde colocarla?" segun cuantas escenas hay ahora.
+function buildAddScenePositions() {
+  const sel = $("add-scene-pos");
+  if (!sel) return;
+  sel.innerHTML = "";
+  const end = document.createElement("option");
+  end.value = String(currentSceneCount);
+  end.textContent = "Al final (después de la última)";
+  sel.appendChild(end);
+  const start = document.createElement("option");
+  start.value = "0";
+  start.textContent = "Al inicio (antes de la escena 1)";
+  sel.appendChild(start);
+  for (let i = 1; i <= currentSceneCount; i++) {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = `Después de la escena ${i}`;
+    sel.appendChild(o);
+  }
+  sel.value = String(currentSceneCount); // por defecto: al final
+}
+
+function toggleAddSceneForm() {
+  const form = $("add-scene-form");
+  if (!form) return;
+  if (form.classList.contains("hidden")) {
+    buildAddScenePositions();
+    form.classList.remove("hidden");
+    $("add-scene-text").focus();
+  } else {
+    form.classList.add("hidden");
+  }
+}
+
+async function submitAddScene() {
+  const text = $("add-scene-text").value.trim();
+  const desc = $("add-scene-desc").value.trim();
+  const posVal = parseInt($("add-scene-pos").value, 10);
+  const status = $("add-scene-status");
+  const btn = $("add-scene-confirm");
+
+  if (!text) {
+    status.style.color = "#ff8a8a";
+    status.textContent = "Escribe el diálogo que se va a narrar en la escena nueva.";
+    return;
+  }
+  btn.disabled = true;
+  status.style.color = "";
+  status.textContent = "Creando la escena (buscando imagen/video)... espera unos segundos.";
+  try {
+    const resp = await fetch("/api/add_scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: currentJob,
+        text,
+        image_desc: desc,
+        position: isNaN(posVal) ? null : posVal,
+      }),
+    });
+    const data = await resp.json();
+    btn.disabled = false;
+    if (!resp.ok) {
+      status.style.color = "#ff8a8a";
+      status.textContent = data.error || "No se pudo agregar la escena.";
+      return;
+    }
+    resetAddSceneForm();
+    renderReview(data.review);  // vuelve a dibujar con la escena nueva incluida
+  } catch (e) {
+    btn.disabled = false;
+    status.style.color = "#ff8a8a";
+    status.textContent = "Error de conexión: " + e;
   }
 }
 
@@ -705,6 +795,11 @@ $("redraft-btn").addEventListener("click", () => { switchTab("story"); show(form
 $("cancel-review-btn").addEventListener("click", () => show(formCard));
 $("new-btn").addEventListener("click", () => show(formCard));
 $("retry-btn").addEventListener("click", () => show(formCard));
+
+// Agregar escena nueva (pantalla de revision)
+if ($("add-scene-btn")) $("add-scene-btn").addEventListener("click", toggleAddSceneForm);
+if ($("add-scene-confirm")) $("add-scene-confirm").addEventListener("click", submitAddScene);
+if ($("add-scene-cancel")) $("add-scene-cancel").addEventListener("click", resetAddSceneForm);
 
 setupMusicControls();
 

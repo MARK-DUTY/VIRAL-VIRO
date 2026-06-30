@@ -46,6 +46,122 @@ SECONDS_PER_IMAGE = 8
 _MAX_EXPAND_TRIES = 3
 
 
+# ==========================================================================
+#  TRADUCTOR de indicaciones ES -> EN (para el editor de imagenes)
+# ==========================================================================
+# Pexels/Pixabay y los generadores de IA funcionan MUCHO mejor en INGLES.
+# Cuando el usuario escribe en espanol (ej: "lloviendo", "carros rojos"),
+# convertimos su texto a una frase de busqueda visual en ingles ANTES de
+# generar/buscar la imagen. Asi el editor SI respeta lo que pide.
+
+# Atajos instantaneos para palabras comunes (sin gastar una llamada a la IA).
+_QUICK_ES_EN = {
+    "lluvia": "rain", "lloviendo": "heavy rain storm", "tormenta": "thunderstorm",
+    "sol": "sunny sky", "soleado": "sunny day", "nieve": "snow", "nevando": "snowfall",
+    "nublado": "cloudy sky", "viento": "windy", "noche": "night city",
+    "amanecer": "sunrise", "atardecer": "sunset",
+    "carro": "car", "carros": "cars", "coche": "car", "coches": "cars",
+    "auto": "car", "autos": "cars", "trafico": "city traffic", "camion": "truck",
+    "moto": "motorcycle", "avion": "airplane", "tren": "train", "barco": "ship",
+    "rojo": "red color background", "roja": "red color background",
+    "azul": "blue color background", "verde": "green color background",
+    "amarillo": "yellow color background", "negro": "black background",
+    "blanco": "white background", "naranja": "orange color background",
+    "dinero": "money cash", "bolsa": "stock market", "ciudad": "city skyline",
+    "playa": "beach", "mar": "ocean sea", "montana": "mountains", "bosque": "forest",
+    "comida": "food", "gente": "crowd of people", "trabajo": "office work",
+    "futbol": "soccer football", "musica": "concert music", "tecnologia": "technology",
+    "celular": "smartphone", "computadora": "laptop computer", "fuego": "fire flames",
+    "agua": "water", "perro": "dog", "gato": "cat", "casa": "house",
+    "escuela": "school", "hospital": "hospital", "doctor": "doctor",
+    "policia": "police", "naturaleza": "nature landscape", "flores": "flowers",
+}
+
+# Palabras que delatan que el texto esta en ESPANOL (para decidir si traducir).
+_ES_HINT = {
+    "que", "de", "la", "el", "los", "las", "un", "una", "con", "sin", "y", "o",
+    "en", "por", "para", "del", "al", "lo", "mi", "tu", "su", "este", "esta",
+    "esto", "ese", "esa", "muy", "donde", "como", "cuando", "esta", "estan",
+}
+# Palabras tipicas de INGLES (para no traducir un prompt que ya viene en ingles).
+_EN_HINT = {
+    "the", "a", "an", "of", "with", "and", "in", "on", "at", "photo", "image",
+    "photorealistic", "realistic", "scene", "background", "portrait", "vertical",
+    "shot", "view", "close", "up", "people", "man", "woman", "city", "light",
+}
+
+
+def _looks_english(text: str) -> bool:
+    """Heuristica simple: ¿el texto ya parece estar en ingles?"""
+    if any(ch in text for ch in "áéíóúñ¿¡üÁÉÍÓÚÑÜ"):
+        return False
+    words = set(re.findall(r"[a-zA-Z]+", text.lower()))
+    if words & _ES_HINT:
+        return False
+    return bool(words & _EN_HINT)
+
+
+def _groq_translate_text(text: str) -> str | None:
+    """Pide a Groq una frase de busqueda visual CORTA en ingles. None si falla."""
+    if not settings.groq_api_key or settings.groq_api_key.startswith("PEGA_AQUI"):
+        return None
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You convert a user's request (often in Spanish) into a SHORT, "
+                "concrete, visual English phrase to search/generate an image or "
+                "video. Reply with ONLY the English phrase (2 to 6 words), no "
+                "quotes, no explanation. Examples: 'lloviendo' -> 'heavy rain "
+                "storm'; 'carros rojos' -> 'red cars'; 'una playa al atardecer' "
+                "-> 'beach at sunset'."
+            ),
+        },
+        {"role": "user", "content": text},
+    ]
+    payload = {
+        "model": settings.groq_model,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 40,
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.groq_api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        resp = requests.post(GROQ_URL, json=payload, headers=headers, timeout=20)
+        if resp.status_code >= 400:
+            return None
+        content = resp.json()["choices"][0]["message"]["content"]
+        content = (content or "").strip().strip('"').strip("'").strip(". ").strip()
+        return content or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def ensure_english(text: str) -> str:
+    """
+    Devuelve el texto en INGLES, listo para buscar/generar imagenes.
+      - Si ya parece ingles, lo deja igual.
+      - Si es una palabra comun, usa el atajo instantaneo.
+      - Si es otra cosa en espanol, lo traduce con la IA (y si falla, deja el original).
+    NUNCA lanza error: en el peor caso devuelve el texto original.
+    """
+    t = (text or "").strip()
+    if not t:
+        return t
+    low = t.lower()
+    if low in _QUICK_ES_EN:
+        return _QUICK_ES_EN[low]
+    words = low.split()
+    if words and all(w in _QUICK_ES_EN for w in words):
+        return " ".join(_QUICK_ES_EN[w] for w in words)
+    if _looks_english(t):
+        return t
+    return _groq_translate_text(t) or t
+
+
 def _tokens_for(duration: int) -> int:
     """Cuanto 'espacio' de respuesta darle a la IA segun la duracion del video.
     Videos largos necesitan mas tokens para no cortarse a la mitad."""
