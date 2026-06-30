@@ -28,7 +28,7 @@ from .article import extract_article, extract_articles
 from .assemble import build_video, probe_duration, resolution_for
 from .config import settings
 from .images import ImageResult, fetch_scene_images, fetch_scene_videos, fetch_single_image, fetch_single_video
-from .script_gen import Scene, generate_script, generate_script_from_story
+from .script_gen import Scene, ensure_english, generate_script, generate_script_from_story
 from .subtitles import SubtitleStyle, build_ass_subtitles, build_subtitles_from_text
 from .voice import WordTiming, synthesize_voice
 
@@ -490,7 +490,12 @@ def update_scene_prompt(prepared: PreparedJob, index: int, new_prompt: str) -> N
     prompt = (new_prompt or "").strip()
     if not prompt:
         raise ValueError("La descripcion de la imagen no puede quedar vacia.")
-    prepared.scenes[index].image_prompt = prompt
+    # Traducimos a ingles para que luego la busqueda/generacion respete lo pedido.
+    english = ensure_english(prompt)
+    sc = prepared.scenes[index]
+    if english.strip().lower() != (sc.image_prompt or "").strip().lower():
+        sc.keyword = english   # refresca la palabra clave de respaldo
+    sc.image_prompt = english
 
 
 # ==========================================================================
@@ -556,9 +561,20 @@ def regenerate_scene_image(
 
     scene = prepared.scenes[index]
     if new_prompt:
-        scene.image_prompt = new_prompt.strip()
+        # Traducimos lo que escribio el usuario a ingles (Pexels y la IA
+        # funcionan mejor asi). Esto es lo que hace que el editor SI respete
+        # "lloviendo", "carros rojos", etc.
+        raw = new_prompt.strip()
+        english = ensure_english(raw)
+        changed = english.strip().lower() != (scene.image_prompt or "").strip().lower()
+        scene.image_prompt = english
+        if changed:
+            # Si la descripcion cambio, refrescamos tambien la palabra clave de
+            # respaldo. Antes se quedaba la vieja (ej. "sunny") y por eso seguia
+            # saliendo la misma imagen aunque pidieras otra cosa.
+            scene.keyword = english
     if new_keyword:
-        scene.keyword = new_keyword.strip()
+        scene.keyword = ensure_english(new_keyword.strip())
 
     images_dir = prepared.job_dir / "images"
     ts = datetime.now().strftime("%H%M%S")
@@ -657,6 +673,87 @@ def delete_scene(prepared: PreparedJob, index: int) -> None:
     if index < len(prepared.images):
         prepared.images.pop(index)
     prepared.narration = prepared.current_narration()
+
+
+# ==========================================================================
+#  Agregar una escena NUEVA (su dialogo + su imagen/video)
+# ==========================================================================
+def add_scene(
+    prepared: PreparedJob,
+    text: str,
+    image_desc: str | None = None,
+    position: int | None = None,
+) -> ImageResult:
+    """
+    Agrega una escena nueva al video que se esta revisando.
+
+    - text       : el dialogo que se va a narrar (en espanol).
+    - image_desc : que imagen/video se quiere (puede escribirse en espanol; se
+                   traduce a ingles). Si va vacio, se deduce del propio dialogo.
+    - position   : indice donde insertarla (0 = al inicio). Si es None o invalido,
+                   se agrega al FINAL.
+
+    Genera de una vez la imagen/video de la escena para que aparezca en la
+    revision. La voz se regenera sola al armar el video (porque cambia la
+    narracion). Devuelve el ImageResult de la nueva escena.
+    """
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("El dialogo de la escena nueva no puede quedar vacio.")
+
+    # Que imagen quiere (traducida a ingles para que la busqueda/IA la respete)
+    desc = (image_desc or "").strip() or text
+    english = ensure_english(desc)
+    scene = Scene(text=text, image_prompt=english, keyword=english)
+
+    # Donde insertarla
+    n = len(prepared.scenes)
+    if position is None or not isinstance(position, int) or position < 0 or position > n:
+        pos = n
+    else:
+        pos = position
+
+    # Conseguimos su imagen/video ANTES de insertarla (si falla, no dejamos una
+    # escena sin medio).
+    images_dir = prepared.job_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%H%M%S")
+    mt = (prepared.media_type or "image").lower()
+
+    result: ImageResult | None = None
+    if mt in ("video", "mixed"):
+        dest = images_dir / f"vid_new_{ts}.mp4"
+        result = fetch_single_video(scene.image_prompt, scene.keyword, dest, used_urls=set())
+        if result is None:
+            dest = images_dir / f"img_new_{ts}.jpg"
+            result = fetch_single_image(
+                scene.image_prompt, scene.keyword, dest, mode="stock", seed=4321, used_urls=set()
+            )
+    else:
+        dest = images_dir / f"img_new_{ts}.jpg"
+        result = fetch_single_image(
+            scene.image_prompt, scene.keyword, dest,
+            mode=prepared.image_source, seed=4321, used_urls=set(),
+        )
+
+    if result is None:
+        raise ValueError(
+            "No pude conseguir imagen/video para la escena nueva. "
+            "Prueba con otra descripcion."
+        )
+
+    # Insertamos la escena y su medio en la misma posicion
+    prepared.scenes.insert(pos, scene)
+    if pos <= len(prepared.images):
+        prepared.images.insert(pos, result)
+    else:
+        prepared.images.append(result)
+
+    prepared.narration = prepared.current_narration()
+    # Los indices de las escenas cambiaron: reiniciamos la memoria de fotos ya
+    # vistas (esta guardada por indice) para que no se desincronice.
+    prepared.used_image_urls = {}
+    return result
 
 
 # ==========================================================================

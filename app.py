@@ -63,6 +63,7 @@ _self_repair()
 
 from pipeline.config import settings
 from pipeline.runner import (
+    add_scene,
     assemble_prepared,
     delete_scene,
     draft_story,
@@ -656,6 +657,33 @@ def api_delete_scene():
     try:
         index = int(data.get("index"))
         delete_scene(job["prepared"], index)
+        job["review"] = _review_payload(job_id)
+        return jsonify({"ok": True, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
+#  Agregar una escena NUEVA (dialogo + imagen/video)
+# --------------------------------------------------------------------------
+@app.route("/api/add_scene", methods=["POST"])
+def api_add_scene():
+    data = request.get_json(force=True) or {}
+    job_id = data.get("job_id")
+    job = JOBS.get(job_id)
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        text = data.get("text") or ""
+        image_desc = data.get("image_desc") or data.get("prompt") or ""
+        position = data.get("position")
+        if position is not None:
+            try:
+                position = int(position)
+            except (TypeError, ValueError):
+                position = None
+        add_scene(job["prepared"], text, image_desc=image_desc, position=position)
         job["review"] = _review_payload(job_id)
         return jsonify({"ok": True, "review": job["review"]})
     except Exception as exc:  # noqa: BLE001

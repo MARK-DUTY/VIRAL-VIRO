@@ -262,6 +262,25 @@
       <div id="review-warning" class="warn-banner hidden"></div>
       <div id="scenes-grid" class="scenes-grid"></div>
 
+      <!-- Agregar una escena NUEVA -->
+      <div class="add-scene-box">
+        <button id="add-scene-btn" class="btn-secondary">➕ Agregar escena nueva</button>
+        <div id="add-scene-form" class="add-scene-form hidden">
+          <h3 class="music-title">➕ Nueva escena</h3>
+          <label class="scene-label">🎬 Diálogo (lo que se narra en esta escena)</label>
+          <textarea id="add-scene-text" rows="3" placeholder="Escribe aquí lo que dirá la voz..."></textarea>
+          <label class="scene-label">🖼️ ¿Qué imagen o video quieres? (puedes escribir en español)</label>
+          <textarea id="add-scene-desc" rows="2" placeholder="Ej: lloviendo, carros rojos, una playa al atardecer..."></textarea>
+          <label class="scene-label">📍 ¿Dónde colocarla?</label>
+          <select id="add-scene-pos"></select>
+          <div class="add-scene-actions">
+            <button id="add-scene-confirm" class="btn-primary">✅ Agregar escena</button>
+            <button id="add-scene-cancel" class="btn-secondary">Cancelar</button>
+          </div>
+          <p class="scene-status" id="add-scene-status"></p>
+        </div>
+      </div>
+
       <!-- Voz y avatar: se pueden cambiar aqui mismo, antes de armar el video -->
       <div class="music-box">
         <h3 class="music-title">🎙️ Voz y avatar</h3>
