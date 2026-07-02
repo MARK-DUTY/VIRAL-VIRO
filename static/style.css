@@ -476,3 +476,60 @@ textarea:focus { border-color: var(--accent); }
 .add-scene-actions { display: flex; gap: 12px; margin-top: 12px; }
 .add-scene-actions button { flex: 1; }
 .scene-status { margin-top: 10px; font-size: 0.88rem; color: var(--muted); min-height: 1.1em; }
+
+
+
+/* ---- Zona de PASTE (pegar screenshot con Ctrl+V) ---- */
+.paste-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 2px dashed rgba(124, 92, 255, 0.4);
+  border-radius: 10px;
+  background: rgba(124, 92, 255, 0.06);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s, box-shadow 0.2s;
+  outline: none;
+  user-select: none;
+}
+
+.paste-zone:hover {
+  border-color: var(--accent);
+  background: rgba(124, 92, 255, 0.12);
+  color: var(--text);
+}
+
+.paste-zone:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25);
+  background: rgba(124, 92, 255, 0.12);
+  color: var(--text);
+}
+
+/* Escena seleccionada como destino del paste */
+.paste-zone.paste-active {
+  border-color: var(--accent);
+  background: rgba(124, 92, 255, 0.15);
+  color: var(--text);
+  box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.3);
+}
+
+/* Feedback visual al pegar exitosamente */
+.paste-zone.paste-success {
+  border-color: var(--ok);
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--ok);
+  animation: paste-flash 0.4s ease;
+}
+
+@keyframes paste-flash {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
