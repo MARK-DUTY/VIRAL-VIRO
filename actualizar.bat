@@ -10,59 +10,67 @@ echo    (No toca tu archivo .env ni tus videos)
 echo ============================================================
 echo.
 
-set BASE=https://raw.githubusercontent.com/MARK-DUTY/VIRAL-VIRO/main
-set FALLOS=0
+REM --- Verificar que git este instalado ---
+git --version >nul 2>&1
+if errorlevel 1 (
+  echo  ERROR: No tienes Git instalado.
+  echo  Descargalo aqui: https://git-scm.com/download/win
+  echo  Instala con las opciones por defecto y vuelve a intentar.
+  echo.
+  pause
+  exit /b 1
+)
 
-echo Actualizando archivos (forzando la ultima version)...
+REM --- Verificar que estamos en un repositorio git ---
+if not exist .git (
+  echo  Este directorio no es un repositorio git.
+  echo  Clonando el repositorio desde cero...
+  echo.
+  cd ..
+  git clone https://github.com/MARK-DUTY/VIRAL-VIRO.git VIRAL-VIRO-temp
+  if errorlevel 1 (
+    echo.
+    echo  ERROR: No se pudo clonar. Revisa tu internet y que tengas
+    echo  acceso al repositorio en GitHub.
+    pause
+    exit /b 1
+  )
+  echo.
+  echo  Repositorio clonado en la carpeta VIRAL-VIRO-temp.
+  echo  Copia tu archivo .env a esa carpeta y usa esa en adelante.
+  pause
+  exit /b 0
+)
+
+REM --- Actualizar con git pull ---
+echo Descargando la ultima version...
 echo.
-
-call :baja app.py
-call :baja requirements.txt
-call :baja run_windows.bat
-call :baja setup_windows.bat
-call :baja actualizar.bat
-call :baja pipeline/article.py
-call :baja pipeline/assemble.py
-call :baja pipeline/avatar.py
-call :baja pipeline/config.py
-call :baja pipeline/images.py
-call :baja pipeline/music.py
-call :baja pipeline/runner.py
-call :baja pipeline/script_gen.py
-call :baja pipeline/subtitles.py
-call :baja pipeline/voice.py
-call :baja pipeline/youtube.py
-call :baja templates/index.html
-call :baja static/app.js
-call :baja static/style.css
+git pull origin main
+if errorlevel 1 (
+  echo.
+  echo  AVISO: git pull fallo. Intentando forzar la actualizacion...
+  git fetch origin main
+  git reset --hard origin/main
+  if errorlevel 1 (
+    echo.
+    echo  ERROR: No se pudo actualizar. Posibles causas:
+    echo  - No tienes internet
+    echo  - No tienes acceso al repositorio en GitHub
+    echo  - Git no esta configurado con tu cuenta
+    echo.
+    echo  Solucion: abre Git Bash aqui y ejecuta:
+    echo    git pull origin main
+    echo.
+    pause
+    exit /b 1
+  )
+)
 
 echo.
 echo ============================================================
-if "%FALLOS%"=="0" (
-  echo    ACTUALIZACION TERMINADA - todos los archivos al dia.
-) else (
-  echo    ATENCION: %FALLOS% archivo^(s^) no se pudieron bajar.
-  echo    Revisa tu internet y vuelve a ejecutar este actualizar.bat.
-)
+echo    ACTUALIZACION TERMINADA
 echo    Ahora cierra el programa ^(la ventana negra^) si esta abierto
 echo    y vuelve a abrirlo con run_windows.bat
 echo ============================================================
 echo.
 pause
-exit /b
-
-REM ---------------------------------------------------------------
-REM  Subrutina que baja UN archivo, forzando version fresca (sin
-REM  cache) y avisando si funciono [OK] o fallo [FALLO].
-REM ---------------------------------------------------------------
-:baja
-set "rel=%~1"
-set "dst=%rel:/=\%"
-curl -fsS --retry 3 -H "Cache-Control: no-cache" -H "Pragma: no-cache" -o "%dst%" "%BASE%/%rel%?nocache=%RANDOM%%RANDOM%"
-if errorlevel 1 (
-  echo   [FALLO] %rel%
-  set /a FALLOS+=1
-) else (
-  echo   [OK]    %rel%
-)
-goto :eof
