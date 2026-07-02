@@ -363,6 +363,9 @@ function renderReview(review) {
         <button class="btn-mini" data-act="upload" data-i="${scene.index}">⬆️ Subir foto/video</button>
         <button class="btn-mini btn-danger" data-act="delete" data-i="${scene.index}">🗑️ Eliminar</button>
       </div>
+      <div class="paste-zone" data-i="${scene.index}" tabindex="0" title="Haz clic aquí y pega (Ctrl+V) una imagen o video del portapapeles">
+        📋 Pegar imagen/video (Ctrl+V)
+      </div>
       <input type="file" accept="image/*,video/*" class="hidden" id="file-${scene.index}">
     `;
     grid.appendChild(card);
@@ -392,6 +395,15 @@ function renderReview(review) {
   grid.querySelectorAll('input[type="file"]').forEach((inp) => {
     const i = parseInt(inp.id.split("-")[1], 10);
     inp.addEventListener("change", () => uploadImage(i, inp.files[0]));
+  });
+
+  // Conectar zonas de paste (clipboard) para cada escena
+  grid.querySelectorAll(".paste-zone").forEach((zone) => {
+    const i = parseInt(zone.dataset.i, 10);
+    zone.addEventListener("click", () => {
+      // Al hacer clic en la zona, intenta leer del clipboard
+      pasteFromClipboard(i);
+    });
   });
 
   show(reviewCard);
@@ -780,6 +792,104 @@ async function previewVoice() {
     btn.disabled = false;
   }
 }
+
+// ----------------------------------------------------------------------
+//  CLIPBOARD PASTE: pegar screenshots directamente en una escena
+// ----------------------------------------------------------------------
+
+// Variable para rastrear cual escena recibira la imagen pegada.
+// Se activa al hacer clic/focus en una paste-zone o scene-card.
+let pasteTargetScene = null;
+
+// Intenta leer una imagen o video del clipboard via la API moderna (navigator.clipboard)
+async function pasteFromClipboard(i) {
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      alert("Tu navegador no soporta leer el portapapeles. Usa Ctrl+V directamente sobre la zona de la escena.");
+      return;
+    }
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      // Buscar imagen o video en el clipboard
+      const mediaType = item.types.find((t) => t.startsWith("image/") || t.startsWith("video/"));
+      if (mediaType) {
+        const blob = await item.getType(mediaType);
+        const isVideo = mediaType.startsWith("video/");
+        const ext = mediaType.split("/")[1] || (isVideo ? "mp4" : "png");
+        const prefix = isVideo ? "video" : "screenshot";
+        const file = new File([blob], `${prefix}_${Date.now()}.${ext}`, { type: mediaType });
+        uploadImage(i, file);
+        return;
+      }
+    }
+    alert("No hay imagen ni video en el portapapeles. Toma un screenshot (Win+Shift+S o PrtSc) o copia un video y luego pega aquí.");
+  } catch (e) {
+    // Si el navegador no permite la API, indicamos usar Ctrl+V
+    alert("No pude acceder al portapapeles. Haz clic en la zona de paste de la escena y presiona Ctrl+V.");
+  }
+}
+
+// Listener GLOBAL de paste: detecta Ctrl+V en cualquier momento
+// y sube la imagen o video a la escena que tenga el foco (pasteTargetScene).
+document.addEventListener("paste", function (e) {
+  // Si el usuario esta escribiendo en un textarea/input, no interceptamos
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "textarea" || tag === "input") return;
+
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+
+  for (let i = 0; i < items.length; i++) {
+    const type = items[i].type;
+    if (type.startsWith("image/") || type.startsWith("video/")) {
+      e.preventDefault();
+      const blob = items[i].getAsFile();
+      if (!blob) return;
+
+      // Determinar la escena destino
+      let targetIndex = pasteTargetScene;
+
+      // Si no hay escena seleccionada, buscar la primera visible
+      if (targetIndex === null) {
+        const firstCard = document.querySelector(".scene-card");
+        if (firstCard) {
+          targetIndex = parseInt(firstCard.id.replace("scene-", ""), 10);
+        }
+      }
+
+      if (targetIndex === null) {
+        alert("Primero haz clic en la escena donde quieres pegar la imagen o video.");
+        return;
+      }
+
+      const isVideo = type.startsWith("video/");
+      const ext = type.split("/")[1] || (isVideo ? "mp4" : "png");
+      const prefix = isVideo ? "video" : "screenshot";
+      const file = new File([blob], `${prefix}_${Date.now()}.${ext}`, { type: type });
+      uploadImage(targetIndex, file);
+
+      // Feedback visual
+      const zone = document.querySelector(`.paste-zone[data-i="${targetIndex}"]`);
+      if (zone) {
+        zone.classList.add("paste-success");
+        setTimeout(() => zone.classList.remove("paste-success"), 1500);
+      }
+      return;
+    }
+  }
+});
+
+// Al hacer clic o focus en una scene-card o paste-zone, marcarla como destino
+document.addEventListener("click", function (e) {
+  const card = e.target.closest(".scene-card");
+  if (card) {
+    pasteTargetScene = parseInt(card.id.replace("scene-", ""), 10);
+    // Resaltar visualmente la zona activa
+    document.querySelectorAll(".paste-zone").forEach((z) => z.classList.remove("paste-active"));
+    const zone = card.querySelector(".paste-zone");
+    if (zone) zone.classList.add("paste-active");
+  }
+});
 
 // ----------------------------------------------------------------------
 //  Eventos
