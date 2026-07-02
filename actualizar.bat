@@ -10,7 +10,7 @@ echo    (No toca tu archivo .env ni tus videos)
 echo ============================================================
 echo.
 
-set BASE=https://raw.githubusercontent.com/MARK-DUTY/VIROFEED-PERSONAL/main
+set BASE=https://raw.githubusercontent.com/MARK-DUTY/VIRAL-VIRO/main
 set FALLOS=0
 
 echo Actualizando archivos (forzando la ultima version)...
@@ -20,6 +20,7 @@ call :baja app.py
 call :baja requirements.txt
 call :baja run_windows.bat
 call :baja setup_windows.bat
+call :baja actualizar.bat
 call :baja pipeline/article.py
 call :baja pipeline/assemble.py
 call :baja pipeline/avatar.py
