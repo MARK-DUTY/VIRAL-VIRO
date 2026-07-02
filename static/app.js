@@ -363,8 +363,8 @@ function renderReview(review) {
         <button class="btn-mini" data-act="upload" data-i="${scene.index}">⬆️ Subir foto/video</button>
         <button class="btn-mini btn-danger" data-act="delete" data-i="${scene.index}">🗑️ Eliminar</button>
       </div>
-      <div class="paste-zone" data-i="${scene.index}" tabindex="0" title="Haz clic aquí y pega (Ctrl+V) una imagen del portapapeles">
-        📋 Pegar screenshot (Ctrl+V)
+      <div class="paste-zone" data-i="${scene.index}" tabindex="0" title="Haz clic aquí y pega (Ctrl+V) una imagen o video del portapapeles">
+        📋 Pegar imagen/video (Ctrl+V)
       </div>
       <input type="file" accept="image/*,video/*" class="hidden" id="file-${scene.index}">
     `;
@@ -801,7 +801,7 @@ async function previewVoice() {
 // Se activa al hacer clic/focus en una paste-zone o scene-card.
 let pasteTargetScene = null;
 
-// Intenta leer una imagen del clipboard via la API moderna (navigator.clipboard)
+// Intenta leer una imagen o video del clipboard via la API moderna (navigator.clipboard)
 async function pasteFromClipboard(i) {
   try {
     if (!navigator.clipboard || !navigator.clipboard.read) {
@@ -810,16 +810,19 @@ async function pasteFromClipboard(i) {
     }
     const items = await navigator.clipboard.read();
     for (const item of items) {
-      const imageType = item.types.find((t) => t.startsWith("image/"));
-      if (imageType) {
-        const blob = await item.getType(imageType);
-        const ext = imageType.split("/")[1] || "png";
-        const file = new File([blob], `screenshot_${Date.now()}.${ext}`, { type: imageType });
+      // Buscar imagen o video en el clipboard
+      const mediaType = item.types.find((t) => t.startsWith("image/") || t.startsWith("video/"));
+      if (mediaType) {
+        const blob = await item.getType(mediaType);
+        const isVideo = mediaType.startsWith("video/");
+        const ext = mediaType.split("/")[1] || (isVideo ? "mp4" : "png");
+        const prefix = isVideo ? "video" : "screenshot";
+        const file = new File([blob], `${prefix}_${Date.now()}.${ext}`, { type: mediaType });
         uploadImage(i, file);
         return;
       }
     }
-    alert("No hay imagen en el portapapeles. Toma un screenshot primero (Win+Shift+S o PrtSc) y luego pega aquí.");
+    alert("No hay imagen ni video en el portapapeles. Toma un screenshot (Win+Shift+S o PrtSc) o copia un video y luego pega aquí.");
   } catch (e) {
     // Si el navegador no permite la API, indicamos usar Ctrl+V
     alert("No pude acceder al portapapeles. Haz clic en la zona de paste de la escena y presiona Ctrl+V.");
@@ -827,7 +830,7 @@ async function pasteFromClipboard(i) {
 }
 
 // Listener GLOBAL de paste: detecta Ctrl+V en cualquier momento
-// y sube la imagen a la escena que tenga el foco (pasteTargetScene).
+// y sube la imagen o video a la escena que tenga el foco (pasteTargetScene).
 document.addEventListener("paste", function (e) {
   // Si el usuario esta escribiendo en un textarea/input, no interceptamos
   const tag = (e.target.tagName || "").toLowerCase();
@@ -837,7 +840,8 @@ document.addEventListener("paste", function (e) {
   if (!items) return;
 
   for (let i = 0; i < items.length; i++) {
-    if (items[i].type.startsWith("image/")) {
+    const type = items[i].type;
+    if (type.startsWith("image/") || type.startsWith("video/")) {
       e.preventDefault();
       const blob = items[i].getAsFile();
       if (!blob) return;
@@ -854,12 +858,14 @@ document.addEventListener("paste", function (e) {
       }
 
       if (targetIndex === null) {
-        alert("Primero haz clic en la escena donde quieres pegar la imagen.");
+        alert("Primero haz clic en la escena donde quieres pegar la imagen o video.");
         return;
       }
 
-      const ext = blob.type.split("/")[1] || "png";
-      const file = new File([blob], `screenshot_${Date.now()}.${ext}`, { type: blob.type });
+      const isVideo = type.startsWith("video/");
+      const ext = type.split("/")[1] || (isVideo ? "mp4" : "png");
+      const prefix = isVideo ? "video" : "screenshot";
+      const file = new File([blob], `${prefix}_${Date.now()}.${ext}`, { type: type });
       uploadImage(targetIndex, file);
 
       // Feedback visual
