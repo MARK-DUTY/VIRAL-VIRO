@@ -48,6 +48,44 @@ NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
 # ======================================================================
+#  Soporte de VARIAS PANTALLAS (monitores)
+# ======================================================================
+def _enable_dpi_awareness():
+    """Hace que las coordenadas coincidan con los pixeles reales (importante
+    con varias pantallas y escalado de Windows)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def virtual_screen_bounds():
+    """Devuelve (x, y, ancho, alto) del ESCRITORIO COMPLETO que abarca TODAS
+    las pantallas. Asi el selector cubre los dos monitores."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            x = u.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
+            y = u.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
+            w = u.GetSystemMetrics(78)   # SM_CXVIRTUALSCREEN
+            h = u.GetSystemMetrics(79)   # SM_CYVIRTUALSCREEN
+            if w > 0 and h > 0:
+                return x, y, w, h
+        except Exception:  # noqa: BLE001
+            pass
+    # Fallback: solo la pantalla principal
+    tmp = tk.Tk()
+    tmp.withdraw()
+    w, h = tmp.winfo_screenwidth(), tmp.winfo_screenheight()
+    tmp.destroy()
+    return 0, 0, w, h
+
+
+# ======================================================================
 #  Iconos de la bandeja (camarita normal y camarita ROJA al grabar)
 # ======================================================================
 def make_tray_icon(recording: bool = False) -> Image.Image:
@@ -93,7 +131,8 @@ def copy_image_to_clipboard(image) -> bool:
             "[System.Windows.Forms.Clipboard]::SetImage($img); "
             "$img.Dispose()"
         )
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+        # -STA: el portapapeles requiere este modo de hilo en Windows
+        subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
                        check=True, creationflags=NO_WINDOW)
         return True
     except Exception:  # noqa: BLE001
@@ -106,13 +145,15 @@ def copy_file_to_clipboard(path: str) -> bool:
     if sys.platform != "win32":
         return False
     try:
+        safe = path.replace("'", "''")
         ps = (
             "Add-Type -AssemblyName System.Windows.Forms; "
             "$c = New-Object System.Collections.Specialized.StringCollection; "
-            f"$c.Add('{path}'); "
+            f"$c.Add('{safe}'); "
             "[System.Windows.Forms.Clipboard]::SetFileDropList($c)"
         )
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+        # -STA es OBLIGATORIO para copiar archivos al portapapeles
+        subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
                        check=True, creationflags=NO_WINDOW)
         return True
     except Exception:  # noqa: BLE001
@@ -135,17 +176,21 @@ class RegionSelector:
         self.selecting = False
         self.rect_id = None
 
+        # Cubrir TODAS las pantallas (escritorio virtual completo)
+        self.vx, self.vy, vw, vh = virtual_screen_bounds()
+
         self.win = tk.Toplevel(parent)
-        self.win.attributes("-fullscreen", True)
+        self.win.overrideredirect(True)               # sin barra: permite abarcar 2 monitores
+        self.win.geometry(f"{vw}x{vh}+{self.vx}+{self.vy}")
         self.win.attributes("-alpha", 0.25)
         self.win.attributes("-topmost", True)
         self.win.configure(bg="black", cursor="crosshair")
 
         self.canvas = tk.Canvas(self.win, bg="black", highlightthickness=0, cursor="crosshair")
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        # Texto de ayuda centrado en cada mitad (por si hay 2 pantallas)
         self.canvas.create_text(
-            self.win.winfo_screenwidth() // 2, 40,
-            text=hint, fill="white", font=("Arial", 15, "bold")
+            vw // 2, 40, text=hint, fill="white", font=("Arial", 15, "bold")
         )
 
         self.canvas.bind("<Button-1>", self._press)
@@ -153,6 +198,7 @@ class RegionSelector:
         self.canvas.bind("<ButtonRelease-1>", self._release)
         self.canvas.bind("<Button-3>", lambda e: self._cancel())
         self.win.bind("<Escape>", lambda e: self._cancel())
+        self.win.focus_force()
 
     def _press(self, event):
         self.selecting = True
@@ -165,9 +211,13 @@ class RegionSelector:
         self.cur_x, self.cur_y = event.x_root, event.y_root
         if self.rect_id:
             self.canvas.delete(self.rect_id)
+        # Coordenadas del canvas = globales menos el origen del escritorio virtual
         x1, y1 = min(self.start_x, self.cur_x), min(self.start_y, self.cur_y)
         x2, y2 = max(self.start_x, self.cur_x), max(self.start_y, self.cur_y)
-        self.rect_id = self.canvas.create_rectangle(x1, y1, x2, y2, outline="#00e5ff", width=2)
+        self.rect_id = self.canvas.create_rectangle(
+            x1 - self.vx, y1 - self.vy, x2 - self.vx, y2 - self.vy,
+            outline="#00e5ff", width=2
+        )
 
     def _release(self, event):
         if not self.selecting:
@@ -196,7 +246,8 @@ def take_screenshot(parent, on_done):
 
     def _grab(x1, y1, x2, y2):
         try:
-            img = ImageGrab.grab(bbox=(x1, y1, x2, y2))
+            # all_screens=True permite capturar de CUALQUIER monitor
+            img = ImageGrab.grab(bbox=(x1, y1, x2, y2), all_screens=True)
             copied = copy_image_to_clipboard(img)
             ImageOptionsPopup(parent, img, copied, on_done)
         except Exception as e:  # noqa: BLE001
@@ -539,10 +590,15 @@ class VideoOptionsPopup:
         tk.Label(self.win, text=f"Tamano: {size_mb:.1f} MB",
                  font=("Arial", 9), bg="#1e1e2e", fg="#aaa").pack()
 
-        # Boton para VER el video (lo abre en el reproductor de Windows)
-        tk.Button(self.win, text="👁  Ver video", command=self._preview,
+        # Botones para VER el video o ABRIR su carpeta (para arrastrarlo)
+        top_btns = tk.Frame(self.win, bg="#1e1e2e")
+        top_btns.pack(pady=(10, 6))
+        tk.Button(top_btns, text="👁  Ver video", command=self._preview,
                   bg="#455a64", fg="white", font=("Arial", 9, "bold"),
-                  relief=tk.FLAT, padx=10, pady=5, cursor="hand2").pack(pady=(10, 6))
+                  relief=tk.FLAT, padx=10, pady=5, cursor="hand2").pack(side=tk.LEFT, padx=4)
+        tk.Button(top_btns, text="📁  Abrir carpeta", command=self._open_folder,
+                  bg="#455a64", fg="white", font=("Arial", 9, "bold"),
+                  relief=tk.FLAT, padx=10, pady=5, cursor="hand2").pack(side=tk.LEFT, padx=4)
 
         btns = tk.Frame(self.win, bg="#1e1e2e")
         btns.pack(pady=(4, 16), padx=16)
@@ -552,7 +608,7 @@ class VideoOptionsPopup:
                       font=("Arial", 9, "bold"), relief=tk.FLAT,
                       padx=10, pady=6, cursor="hand2", activebackground=bg).pack(side=tk.LEFT, padx=4)
 
-        mkbtn("📋 Copiar", self._copy, "#3949ab")
+        mkbtn("📋 Copiar archivo", self._copy, "#3949ab")
         mkbtn("💾 Guardar", self._save, "#00897b")
         mkbtn("❌ Descartar", self._discard, "#c62828")
 
@@ -568,10 +624,24 @@ class VideoOptionsPopup:
         except Exception:  # noqa: BLE001
             messagebox.showinfo("Video", f"El video esta en:\n{self.video_path}")
 
+    def _open_folder(self):
+        """Abre el Explorador con el video seleccionado para arrastrarlo."""
+        try:
+            subprocess.Popen(["explorer", "/select,", self.video_path])
+        except Exception:  # noqa: BLE001
+            messagebox.showinfo("Carpeta", f"El video esta en:\n{self.video_path}")
+
     def _copy(self):
         if copy_file_to_clipboard(self.video_path):
-            messagebox.showinfo("Copiado",
-                                "Video copiado. Pega con Ctrl+V en un chat o correo para enviarlo.")
+            messagebox.showinfo(
+                "Video copiado",
+                "El video quedo copiado como ARCHIVO.\n\n"
+                "• Pega con Ctrl+V en: WhatsApp/Telegram de escritorio, correo,\n"
+                "  o en una carpeta del Explorador.\n\n"
+                "⚠ En paginas web (chats del navegador) a veces NO se puede pegar\n"
+                "un video. En ese caso usa '📁 Abrir carpeta' y ARRASTRA el archivo,\n"
+                "o usa '💾 Guardar' y adjuntalo.",
+            )
         else:
             messagebox.showwarning("Aviso", "No se pudo copiar. Usa Guardar.")
 
@@ -685,4 +755,5 @@ class ProCamApp:
 
 
 if __name__ == "__main__":
+    _enable_dpi_awareness()   # coordenadas correctas con varias pantallas
     ProCamApp().run()
