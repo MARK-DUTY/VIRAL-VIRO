@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-Herramienta de captura de pantalla con el mouse (para Windows)
+Herramienta de captura de pantalla 100% con el MOUSE (para Windows)
 
-REEMPLAZA Ctrl+Shift+S:
-- Presiona clic izquierdo + arrastra para seleccionar la region
-- Al soltar, se toma el screenshot automaticamente
-- Se COPIA solo al portapapeles (para pegar con Ctrl+V donde quieras)
-- Ademas puedes GUARDARLO o DESCARTARLO
+COMO FUNCIONA:
+- Aparece un boton flotante  📸  en una esquina de tu pantalla (siempre visible).
+- Le das UN CLIC al boton  ->  entras en modo captura.
+- Arrastras con el clic izquierdo para seleccionar la region.
+- Al soltar, se toma el screenshot y se COPIA solo al portapapeles (Ctrl+V).
+- Puedes GUARDARLO o solo pegarlo donde quieras.
 
-Funciona 100% independiente. No necesita ningun otro programa.
+TODO CON EL MOUSE. No necesitas el teclado.
+- Puedes ARRASTRAR el boton flotante para moverlo de lugar.
+- CLIC DERECHO sobre el boton  ->  menu para cerrar el programa.
 """
 
 import os
@@ -21,225 +24,263 @@ from tkinter import filedialog, messagebox
 from PIL import ImageGrab, ImageTk
 
 
-class ScreenCaptureApp:
+class FloatingButton:
+    """Boton flotante siempre visible que inicia la captura con un clic."""
+
     def __init__(self):
-        self.start_x = 0
-        self.start_y = 0
-        self.current_x = 0
-        self.current_y = 0
+        self.root = tk.Tk()
+        self.root.overrideredirect(True)          # sin bordes ni barra
+        self.root.attributes('-topmost', True)     # siempre encima
+        self.root.attributes('-alpha', 0.92)
+        self.root.configure(bg='#3949ab')
+
+        # Posicion inicial: esquina inferior derecha
+        size = 62
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        x = sw - size - 30
+        y = sh - size - 80
+        self.root.geometry(f"{size}x{size}+{x}+{y}")
+
+        self.btn = tk.Label(
+            self.root, text="📸", font=("Segoe UI Emoji", 24),
+            bg='#3949ab', fg='white', cursor='hand2'
+        )
+        self.btn.pack(fill=tk.BOTH, expand=True)
+
+        # --- Interaccion con el mouse ---
+        # Clic izquierdo: si no arrastraste, inicia captura; si arrastraste, mueve.
+        self.btn.bind('<Button-1>', self._press)
+        self.btn.bind('<B1-Motion>', self._drag)
+        self.btn.bind('<ButtonRelease-1>', self._release)
+        # Clic derecho: menu (cerrar)
+        self.btn.bind('<Button-3>', self._menu)
+
+        self._down_x = 0
+        self._down_y = 0
+        self._moved = False
+
+        # Menu contextual (clic derecho)
+        self.ctx = tk.Menu(self.root, tearoff=0)
+        self.ctx.add_command(label="📸  Tomar screenshot", command=self.start_capture)
+        self.ctx.add_separator()
+        self.ctx.add_command(label="❌  Cerrar programa", command=self.root.destroy)
+
+    def _press(self, event):
+        self._down_x = event.x_root
+        self._down_y = event.y_root
+        self._moved = False
+
+    def _drag(self, event):
+        dx = event.x_root - self._down_x
+        dy = event.y_root - self._down_y
+        if abs(dx) > 4 or abs(dy) > 4:
+            self._moved = True
+            x = self.root.winfo_x() + (event.x_root - self._offset_x())
+        # mover la ventana siguiendo el mouse
+        if self._moved:
+            self.root.geometry(f"+{event.x_root - 31}+{event.y_root - 31}")
+
+    def _offset_x(self):
+        return 31
+
+    def _release(self, event):
+        # Si NO se movio, fue un clic -> iniciar captura
+        if not self._moved:
+            self.start_capture()
+
+    def _menu(self, event):
+        try:
+            self.ctx.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.ctx.grab_release()
+
+    def start_capture(self):
+        # Ocultar el boton mientras capturamos
+        self.root.withdraw()
+        CaptureOverlay(self.root, on_done=self._show_again)
+
+    def _show_again(self):
+        # Volver a mostrar el boton flotante para la siguiente captura
+        self.root.deiconify()
+        self.root.attributes('-topmost', True)
+
+    def run(self):
+        self.root.mainloop()
+
+
+class CaptureOverlay:
+    """Overlay a pantalla completa para seleccionar la region con el mouse."""
+
+    def __init__(self, parent, on_done):
+        self.parent = parent
+        self.on_done = on_done
+        self.start_x = self.start_y = 0
+        self.cur_x = self.cur_y = 0
         self.capturing = False
+        self.rect_id = None
         self.screenshot_image = None
 
-        # Ventana raiz invisible (controla el ciclo de vida de la app)
-        self.root = tk.Tk()
-        self.root.withdraw()
+        self.win = tk.Toplevel(parent)
+        self.win.attributes('-fullscreen', True)
+        self.win.attributes('-alpha', 0.25)
+        self.win.attributes('-topmost', True)
+        self.win.configure(bg='black', cursor='crosshair')
 
-        # Overlay a pantalla completa, semi-transparente, para seleccionar
-        self.overlay = tk.Toplevel(self.root)
-        self.overlay.attributes('-fullscreen', True)
-        self.overlay.attributes('-alpha', 0.25)
-        self.overlay.attributes('-topmost', True)
-        self.overlay.configure(bg='black', cursor='crosshair')
-
-        self.canvas = tk.Canvas(
-            self.overlay, bg='black', cursor='crosshair', highlightthickness=0
-        )
+        self.canvas = tk.Canvas(self.win, bg='black', highlightthickness=0, cursor='crosshair')
         self.canvas.pack(fill=tk.BOTH, expand=True)
-
-        # Texto de ayuda arriba
         self.canvas.create_text(
-            self.overlay.winfo_screenwidth() // 2, 40,
-            text="Arrastra con el clic izquierdo para seleccionar  ·  ESC para cancelar",
-            fill="white", font=("Arial", 16, "bold")
+            self.win.winfo_screenwidth() // 2, 40,
+            text="Arrastra con el clic izquierdo para seleccionar  ·  clic derecho para cancelar",
+            fill="white", font=("Arial", 15, "bold")
         )
 
-        # Eventos del mouse
-        self.canvas.bind('<Button-1>', self.on_mouse_press)
-        self.canvas.bind('<B1-Motion>', self.on_mouse_drag)
-        self.canvas.bind('<ButtonRelease-1>', self.on_mouse_release)
-        self.overlay.bind('<Escape>', lambda e: self.cancel_capture())
+        self.canvas.bind('<Button-1>', self._press)
+        self.canvas.bind('<B1-Motion>', self._drag)
+        self.canvas.bind('<ButtonRelease-1>', self._release)
+        self.canvas.bind('<Button-3>', lambda e: self._cancel())  # clic derecho = cancelar
+        self.win.bind('<Escape>', lambda e: self._cancel())
 
-        self.rect_id = None
-
-    def on_mouse_press(self, event):
+    def _press(self, event):
         self.capturing = True
         self.start_x = event.x_root
         self.start_y = event.y_root
-        self.current_x = self.start_x
-        self.current_y = self.start_y
+        self.cur_x = self.start_x
+        self.cur_y = self.start_y
 
-    def on_mouse_drag(self, event):
+    def _drag(self, event):
         if not self.capturing:
             return
-        self.current_x = event.x_root
-        self.current_y = event.y_root
-
+        self.cur_x = event.x_root
+        self.cur_y = event.y_root
         if self.rect_id:
             self.canvas.delete(self.rect_id)
+        x1, y1 = min(self.start_x, self.cur_x), min(self.start_y, self.cur_y)
+        x2, y2 = max(self.start_x, self.cur_x), max(self.start_y, self.cur_y)
+        self.rect_id = self.canvas.create_rectangle(x1, y1, x2, y2, outline='#00e5ff', width=2)
 
-        x1 = min(self.start_x, self.current_x)
-        y1 = min(self.start_y, self.current_y)
-        x2 = max(self.start_x, self.current_x)
-        y2 = max(self.start_y, self.current_y)
-
-        self.rect_id = self.canvas.create_rectangle(
-            x1, y1, x2, y2, outline='#00e5ff', width=2
-        )
-
-    def on_mouse_release(self, event):
+    def _release(self, event):
         if not self.capturing:
             return
         self.capturing = False
-
-        x1 = min(self.start_x, self.current_x)
-        y1 = min(self.start_y, self.current_y)
-        x2 = max(self.start_x, self.current_x)
-        y2 = max(self.start_y, self.current_y)
-
-        # Region demasiado pequena: reiniciamos (probablemente fue un clic)
+        x1, y1 = min(self.start_x, self.cur_x), min(self.start_y, self.cur_y)
+        x2, y2 = max(self.start_x, self.cur_x), max(self.start_y, self.cur_y)
         if x2 - x1 < 8 or y2 - y1 < 8:
-            if self.rect_id:
-                self.canvas.delete(self.rect_id)
-            self.rect_id = None
+            self._cancel()
             return
+        self.win.withdraw()
+        self.win.update()
+        self.parent.after(120, lambda: self._grab(x1, y1, x2, y2))
 
-        # Ocultamos el overlay ANTES de capturar (para que no salga en la foto)
-        self.overlay.withdraw()
-        self.overlay.update()
-        self.root.after(120, lambda: self._grab_region(x1, y1, x2, y2))
+    def _cancel(self):
+        self.win.destroy()
+        self.on_done()
 
-    def _grab_region(self, x1, y1, x2, y2):
+    def _grab(self, x1, y1, x2, y2):
         try:
             self.screenshot_image = ImageGrab.grab(bbox=(x1, y1, x2, y2))
-            # Copiamos AL PORTAPAPELES automaticamente (listo para Ctrl+V)
-            copied = self._copy_to_clipboard(self.screenshot_image)
-            self.show_options_popup(copied)
+            copied = copy_to_clipboard(self.screenshot_image)
+            self.win.destroy()
+            OptionsPopup(self.parent, self.screenshot_image, copied, self.on_done)
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Error", f"No se pudo capturar:\n{e}")
-            self.root.quit()
+            self.win.destroy()
+            self.on_done()
 
-    def cancel_capture(self):
-        self.capturing = False
-        self.root.quit()
 
-    # ------------------------------------------------------------------
-    #  Copiar la imagen al portapapeles de Windows (para pegar con Ctrl+V)
-    # ------------------------------------------------------------------
-    def _copy_to_clipboard(self, image) -> bool:
-        if sys.platform != 'win32':
-            return False
-        try:
-            temp_path = os.path.join(
-                os.getenv('TEMP', os.getcwd()), 'screenshot_clip.png'
-            )
-            image.save(temp_path, 'PNG')
-            ps = (
-                "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
-                f"$img=[System.Drawing.Image]::FromFile('{temp_path}'); "
-                "[System.Windows.Forms.Clipboard]::SetImage($img); "
-                "$img.Dispose()"
-            )
-            subprocess.run(
-                ['powershell', '-NoProfile', '-Command', ps],
-                check=True,
-                creationflags=0x08000000,  # sin ventana
-            )
-            return True
-        except Exception:  # noqa: BLE001
-            return False
+class OptionsPopup:
+    """Popup con la vista previa y opciones (copiar de nuevo / guardar / cerrar)."""
 
-    # ------------------------------------------------------------------
-    #  Popup de opciones despues de capturar
-    # ------------------------------------------------------------------
-    def show_options_popup(self, copied_ok: bool):
-        popup = tk.Toplevel(self.root)
-        popup.title("Screenshot listo")
-        popup.resizable(False, False)
-        popup.attributes('-topmost', True)
-        popup.configure(bg='#1e1e2e')
+    def __init__(self, parent, image, copied_ok, on_done):
+        self.parent = parent
+        self.image = image
+        self.on_done = on_done
 
-        # Vista previa
-        preview = self.screenshot_image.copy()
+        self.win = tk.Toplevel(parent)
+        self.win.title("Screenshot listo")
+        self.win.resizable(False, False)
+        self.win.attributes('-topmost', True)
+        self.win.configure(bg='#1e1e2e')
+
+        preview = image.copy()
         preview.thumbnail((420, 220))
         photo = ImageTk.PhotoImage(preview)
-        img_label = tk.Label(popup, image=photo, bg='#1e1e2e')
-        img_label.image = photo
-        img_label.pack(pady=(16, 8), padx=16)
+        lbl = tk.Label(self.win, image=photo, bg='#1e1e2e')
+        lbl.image = photo
+        lbl.pack(pady=(16, 8), padx=16)
 
-        # Mensaje segun si se copio bien
         if copied_ok:
-            msg = "Ya esta COPIADO. Pega con Ctrl+V donde quieras."
-            color = "#00e676"
+            msg, color = "Ya esta COPIADO. Pega con Ctrl+V donde quieras.", "#00e676"
         else:
-            msg = "Capturado. Usa Guardar (no se pudo copiar al portapapeles)."
-            color = "#ffb74d"
-        tk.Label(
-            popup, text=msg, font=("Arial", 11, "bold"),
-            bg='#1e1e2e', fg=color
-        ).pack(pady=(0, 4))
+            msg, color = "Capturado. Usa Guardar (no se pudo copiar).", "#ffb74d"
+        tk.Label(self.win, text=msg, font=("Arial", 11, "bold"), bg='#1e1e2e', fg=color).pack()
+        tk.Label(self.win, text=f"{image.size[0]} x {image.size[1]} px",
+                 font=("Arial", 9), bg='#1e1e2e', fg='#aaa').pack(pady=(2, 10))
 
-        tk.Label(
-            popup,
-            text=f"{self.screenshot_image.size[0]} x {self.screenshot_image.size[1]} px",
-            font=("Arial", 9), bg='#1e1e2e', fg='#aaa'
-        ).pack(pady=(0, 10))
-
-        btns = tk.Frame(popup, bg='#1e1e2e')
+        btns = tk.Frame(self.win, bg='#1e1e2e')
         btns.pack(pady=(0, 16), padx=16, fill=tk.X)
 
         def mkbtn(text, cmd, bg):
-            b = tk.Button(
-                btns, text=text, command=cmd, bg=bg, fg='white',
-                font=("Arial", 11, "bold"), relief=tk.FLAT,
-                padx=12, pady=10, cursor='hand2', activebackground=bg
-            )
+            b = tk.Button(btns, text=text, command=cmd, bg=bg, fg='white',
+                          font=("Arial", 11, "bold"), relief=tk.FLAT,
+                          padx=12, pady=10, cursor='hand2', activebackground=bg)
             b.pack(fill=tk.X, pady=4)
-            return b
 
         mkbtn("📋  Copiar de nuevo (Ctrl+V)", self._recopy, "#3949ab")
-        mkbtn("💾  Guardar en mi PC", self.save_screenshot, "#00897b")
-        mkbtn("❌  Cerrar", lambda: self.root.quit(), "#c62828")
+        mkbtn("💾  Guardar en mi PC", self._save, "#00897b")
+        mkbtn("✅  Listo (cerrar)", self._close, "#c62828")
 
-        # Centrar el popup
-        popup.update_idletasks()
-        w, h = popup.winfo_width(), popup.winfo_height()
-        x = (popup.winfo_screenwidth() // 2) - (w // 2)
-        y = (popup.winfo_screenheight() // 2) - (h // 2)
-        popup.geometry(f"+{x}+{y}")
-
-        popup.protocol("WM_DELETE_WINDOW", lambda: self.root.quit())
+        self.win.update_idletasks()
+        w, h = self.win.winfo_width(), self.win.winfo_height()
+        x = (self.win.winfo_screenwidth() // 2) - (w // 2)
+        y = (self.win.winfo_screenheight() // 2) - (h // 2)
+        self.win.geometry(f"+{x}+{y}")
+        self.win.protocol("WM_DELETE_WINDOW", self._close)
 
     def _recopy(self):
-        ok = self._copy_to_clipboard(self.screenshot_image)
-        if ok:
+        if copy_to_clipboard(self.image):
             messagebox.showinfo("Copiado", "Listo. Pega con Ctrl+V donde quieras.")
         else:
             messagebox.showwarning("Aviso", "No se pudo copiar. Usa Guardar.")
 
-    def save_screenshot(self):
+    def _save(self):
         try:
-            default_name = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            file_path = filedialog.asksaveasfilename(
+            name = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            path = filedialog.asksaveasfilename(
                 defaultextension=".png",
                 filetypes=[("Imagen PNG", "*.png"), ("Imagen JPG", "*.jpg")],
-                initialfile=default_name,
+                initialfile=name,
             )
-            if file_path:
-                self.screenshot_image.save(file_path)
-                messagebox.showinfo("Guardado", f"Guardado en:\n{file_path}")
-                self.root.quit()
+            if path:
+                self.image.save(path)
+                messagebox.showinfo("Guardado", f"Guardado en:\n{path}")
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Error", f"No se pudo guardar:\n{e}")
 
-    def run(self):
-        try:
-            self.root.mainloop()
-        finally:
-            try:
-                self.root.destroy()
-            except Exception:  # noqa: BLE001
-                pass
+    def _close(self):
+        self.win.destroy()
+        self.on_done()
+
+
+def copy_to_clipboard(image) -> bool:
+    """Copia la imagen al portapapeles de Windows (para pegar con Ctrl+V)."""
+    if sys.platform != 'win32':
+        return False
+    try:
+        temp_path = os.path.join(os.getenv('TEMP', os.getcwd()), 'screenshot_clip.png')
+        image.save(temp_path, 'PNG')
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
+            f"$img=[System.Drawing.Image]::FromFile('{temp_path}'); "
+            "[System.Windows.Forms.Clipboard]::SetImage($img); "
+            "$img.Dispose()"
+        )
+        subprocess.run(['powershell', '-NoProfile', '-Command', ps],
+                       check=True, creationflags=0x08000000)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 if __name__ == "__main__":
-    ScreenCaptureApp().run()
+    FloatingButton().run()
