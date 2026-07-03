@@ -52,12 +52,17 @@ NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 # ======================================================================
 def _enable_dpi_awareness():
     """Hace que las coordenadas coincidan con los pixeles reales (importante
-    con varias pantallas y escalado de Windows)."""
+    con varias pantallas y escalado de Windows). Debe llamarse ANTES de crear
+    cualquier ventana de tkinter."""
     if sys.platform != "win32":
         return
     try:
         import ctypes
-        ctypes.windll.user32.SetProcessDPIAware()
+        try:
+            # Per-Monitor v2: lo mejor para varios monitores con distinto escalado
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:  # noqa: BLE001
+            ctypes.windll.user32.SetProcessDPIAware()
     except Exception:  # noqa: BLE001
         pass
 
@@ -737,4 +742,5 @@ class ProCamApp:
 
 
 if __name__ == "__main__":
+    _enable_dpi_awareness()   # ANTES de crear tkinter: coordenadas = pixeles reales
     ProCamApp().run()
