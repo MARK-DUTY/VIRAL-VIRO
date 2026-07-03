@@ -1,42 +1,28 @@
 @echo off
-REM Herramienta de Captura de Pantalla para VIRAL-VIRO
-REM Este archivo ejecuta el capturador de pantalla sin mostrar consola
+REM ============================================================
+REM  Capturador de Pantalla - Barra de Tareas
+REM  Instala lo necesario (solo la 1a vez) y arranca el icono
+REM ============================================================
 
-setlocal enabledelayedexpansion
-
-REM Obtener la ruta del directorio actual
+setlocal
 set SCRIPT_DIR=%~dp0
 
-REM Verificar si Python está instalado
+REM Verificar Python
 python --version >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo ERROR: Python no esta instalado o no esta en el PATH
-    echo.
-    echo Soluciones:
-    echo 1. Instala Python desde https://www.python.org
-    echo 2. O usa Python desde la carpeta de VIRAL-VIRO
-    echo 3. O agrega Python a tu PATH de Windows
+    echo ERROR: Python no esta instalado o no esta en el PATH.
+    echo Instala Python desde https://www.python.org  (marca "Add to PATH").
     echo.
     pause
     exit /b 1
 )
 
-REM Verificar si el script existe
-if not exist "%SCRIPT_DIR%screen_capture_tool.py" (
-    echo.
-    echo ERROR: No se encontro screen_capture_tool.py
-    echo Asegurate de que este archivo esta en la misma carpeta que capturador.bat
-    echo.
-    pause
-    exit /b 1
-)
+REM Instalar librerias necesarias (si ya estan, no pasa nada)
+echo Verificando librerias (Pillow, pystray)...
+python -m pip install --quiet --user Pillow pystray >nul 2>&1
 
-REM Ejecutar el capturador en background sin mostrar consola
+REM Ejecutar el capturador SIN ventana de consola
 start "" pythonw "%SCRIPT_DIR%screen_capture_tool.py"
-
-REM Mensaje de confirmacion rapido
-echo Abriendo herramienta de captura...
-timeout /t 1 /nobreak >nul
 
 exit /b 0

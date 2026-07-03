@@ -1,117 +1,60 @@
 #!/usr/bin/env python3
 """
-Herramienta de captura de pantalla 100% con el MOUSE (para Windows)
+Herramienta de captura de pantalla desde la BARRA DE TAREAS (Windows)
 
 COMO FUNCIONA:
-- Aparece un boton flotante  📸  en una esquina de tu pantalla (siempre visible).
-- Le das UN CLIC al boton  ->  entras en modo captura.
+- El programa se pone como un iconito 📷 junto al reloj de Windows
+  (abajo a la derecha, en la bandeja del sistema).
+- CLIC en el icono  ->  entras en modo captura.
 - Arrastras con el clic izquierdo para seleccionar la region.
 - Al soltar, se toma el screenshot y se COPIA solo al portapapeles (Ctrl+V).
 - Puedes GUARDARLO o solo pegarlo donde quieras.
+- CLIC DERECHO en el icono  ->  menu (Tomar screenshot / Salir).
 
-TODO CON EL MOUSE. No necesitas el teclado.
-- Puedes ARRASTRAR el boton flotante para moverlo de lugar.
-- CLIC DERECHO sobre el boton  ->  menu para cerrar el programa.
+TODO CON EL MOUSE. La pantalla queda limpia (nada flotando encima).
+
+Necesita: pip install pystray Pillow
 """
 
 import os
 import sys
 import subprocess
+import threading
 from datetime import datetime
 
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from PIL import ImageGrab, ImageTk
+from PIL import ImageGrab, ImageTk, Image, ImageDraw
+
+try:
+    import pystray
+except ImportError:
+    print("Falta la libreria 'pystray'. Instalala con:  pip install pystray")
+    sys.exit(1)
 
 
-class FloatingButton:
-    """Boton flotante siempre visible que inicia la captura con un clic."""
-
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.overrideredirect(True)          # sin bordes ni barra
-        self.root.attributes('-topmost', True)     # siempre encima
-        self.root.attributes('-alpha', 0.92)
-        self.root.configure(bg='#3949ab')
-
-        # Posicion inicial: esquina inferior derecha
-        size = 62
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        x = sw - size - 30
-        y = sh - size - 80
-        self.root.geometry(f"{size}x{size}+{x}+{y}")
-
-        self.btn = tk.Label(
-            self.root, text="📸", font=("Segoe UI Emoji", 24),
-            bg='#3949ab', fg='white', cursor='hand2'
-        )
-        self.btn.pack(fill=tk.BOTH, expand=True)
-
-        # --- Interaccion con el mouse ---
-        # Clic izquierdo: si no arrastraste, inicia captura; si arrastraste, mueve.
-        self.btn.bind('<Button-1>', self._press)
-        self.btn.bind('<B1-Motion>', self._drag)
-        self.btn.bind('<ButtonRelease-1>', self._release)
-        # Clic derecho: menu (cerrar)
-        self.btn.bind('<Button-3>', self._menu)
-
-        self._down_x = 0
-        self._down_y = 0
-        self._moved = False
-
-        # Menu contextual (clic derecho)
-        self.ctx = tk.Menu(self.root, tearoff=0)
-        self.ctx.add_command(label="📸  Tomar screenshot", command=self.start_capture)
-        self.ctx.add_separator()
-        self.ctx.add_command(label="❌  Cerrar programa", command=self.root.destroy)
-
-    def _press(self, event):
-        self._down_x = event.x_root
-        self._down_y = event.y_root
-        self._moved = False
-
-    def _drag(self, event):
-        dx = event.x_root - self._down_x
-        dy = event.y_root - self._down_y
-        if abs(dx) > 4 or abs(dy) > 4:
-            self._moved = True
-            x = self.root.winfo_x() + (event.x_root - self._offset_x())
-        # mover la ventana siguiendo el mouse
-        if self._moved:
-            self.root.geometry(f"+{event.x_root - 31}+{event.y_root - 31}")
-
-    def _offset_x(self):
-        return 31
-
-    def _release(self, event):
-        # Si NO se movio, fue un clic -> iniciar captura
-        if not self._moved:
-            self.start_capture()
-
-    def _menu(self, event):
-        try:
-            self.ctx.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.ctx.grab_release()
-
-    def start_capture(self):
-        # Ocultar el boton mientras capturamos
-        self.root.withdraw()
-        CaptureOverlay(self.root, on_done=self._show_again)
-
-    def _show_again(self):
-        # Volver a mostrar el boton flotante para la siguiente captura
-        self.root.deiconify()
-        self.root.attributes('-topmost', True)
-
-    def run(self):
-        self.root.mainloop()
+# ----------------------------------------------------------------------
+#  Icono de la bandeja (se dibuja una camarita simple)
+# ----------------------------------------------------------------------
+def make_tray_icon() -> Image.Image:
+    img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    # cuerpo de la camara
+    d.rounded_rectangle([8, 20, 56, 52], radius=6, fill='#3949ab')
+    # visor arriba
+    d.rectangle([24, 14, 40, 22], fill='#3949ab')
+    # lente
+    d.ellipse([24, 28, 40, 44], fill='white')
+    d.ellipse([28, 32, 36, 40], fill='#3949ab')
+    # flash
+    d.ellipse([46, 24, 52, 30], fill='white')
+    return img
 
 
+# ----------------------------------------------------------------------
+#  Overlay para seleccionar la region con el mouse
+# ----------------------------------------------------------------------
 class CaptureOverlay:
-    """Overlay a pantalla completa para seleccionar la region con el mouse."""
-
     def __init__(self, parent, on_done):
         self.parent = parent
         self.on_done = on_done
@@ -138,21 +81,19 @@ class CaptureOverlay:
         self.canvas.bind('<Button-1>', self._press)
         self.canvas.bind('<B1-Motion>', self._drag)
         self.canvas.bind('<ButtonRelease-1>', self._release)
-        self.canvas.bind('<Button-3>', lambda e: self._cancel())  # clic derecho = cancelar
+        self.canvas.bind('<Button-3>', lambda e: self._cancel())
         self.win.bind('<Escape>', lambda e: self._cancel())
 
     def _press(self, event):
         self.capturing = True
         self.start_x = event.x_root
         self.start_y = event.y_root
-        self.cur_x = self.start_x
-        self.cur_y = self.start_y
+        self.cur_x, self.cur_y = self.start_x, self.start_y
 
     def _drag(self, event):
         if not self.capturing:
             return
-        self.cur_x = event.x_root
-        self.cur_y = event.y_root
+        self.cur_x, self.cur_y = event.x_root, event.y_root
         if self.rect_id:
             self.canvas.delete(self.rect_id)
         x1, y1 = min(self.start_x, self.cur_x), min(self.start_y, self.cur_y)
@@ -188,9 +129,10 @@ class CaptureOverlay:
             self.on_done()
 
 
+# ----------------------------------------------------------------------
+#  Popup con vista previa y opciones
+# ----------------------------------------------------------------------
 class OptionsPopup:
-    """Popup con la vista previa y opciones (copiar de nuevo / guardar / cerrar)."""
-
     def __init__(self, parent, image, copied_ok, on_done):
         self.parent = parent
         self.image = image
@@ -221,10 +163,9 @@ class OptionsPopup:
         btns.pack(pady=(0, 16), padx=16, fill=tk.X)
 
         def mkbtn(text, cmd, bg):
-            b = tk.Button(btns, text=text, command=cmd, bg=bg, fg='white',
-                          font=("Arial", 11, "bold"), relief=tk.FLAT,
-                          padx=12, pady=10, cursor='hand2', activebackground=bg)
-            b.pack(fill=tk.X, pady=4)
+            tk.Button(btns, text=text, command=cmd, bg=bg, fg='white',
+                      font=("Arial", 11, "bold"), relief=tk.FLAT,
+                      padx=12, pady=10, cursor='hand2', activebackground=bg).pack(fill=tk.X, pady=4)
 
         mkbtn("📋  Copiar de nuevo (Ctrl+V)", self._recopy, "#3949ab")
         mkbtn("💾  Guardar en mi PC", self._save, "#00897b")
@@ -262,8 +203,10 @@ class OptionsPopup:
         self.on_done()
 
 
+# ----------------------------------------------------------------------
+#  Copiar al portapapeles de Windows
+# ----------------------------------------------------------------------
 def copy_to_clipboard(image) -> bool:
-    """Copia la imagen al portapapeles de Windows (para pegar con Ctrl+V)."""
     if sys.platform != 'win32':
         return False
     try:
@@ -282,5 +225,41 @@ def copy_to_clipboard(image) -> bool:
         return False
 
 
+# ----------------------------------------------------------------------
+#  App principal: icono en la bandeja del sistema (barra de tareas)
+# ----------------------------------------------------------------------
+class TrayCaptureApp:
+    def __init__(self):
+        # tkinter corre en el hilo principal (oculto).
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+        self.icon = pystray.Icon(
+            "capturador",
+            make_tray_icon(),
+            "Capturador de pantalla (clic para capturar)",
+            menu=pystray.Menu(
+                pystray.MenuItem("📸  Tomar screenshot", self._on_capture, default=True),
+                pystray.MenuItem("❌  Salir", self._on_quit),
+            ),
+        )
+
+    def _on_capture(self, icon, item):
+        # El callback viene del hilo del icono: pasamos la captura al hilo de tkinter.
+        self.root.after(0, self._start_capture)
+
+    def _start_capture(self):
+        CaptureOverlay(self.root, on_done=lambda: None)
+
+    def _on_quit(self, icon, item):
+        icon.stop()
+        self.root.after(0, self.root.destroy)
+
+    def run(self):
+        # El icono corre en un hilo aparte; tkinter en el principal.
+        threading.Thread(target=self.icon.run, daemon=True).start()
+        self.root.mainloop()
+
+
 if __name__ == "__main__":
-    FloatingButton().run()
+    TrayCaptureApp().run()
