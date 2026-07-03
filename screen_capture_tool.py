@@ -144,32 +144,42 @@ class OptionsPopup:
         self.win.attributes('-topmost', True)
         self.win.configure(bg='#1e1e2e')
 
+        # Vista previa GRANDE: la imagen se muestra lo mas grande posible
+        # (hasta el 85% de la pantalla) para que la veas bien antes de decidir.
+        sw = self.win.winfo_screenwidth()
+        sh = self.win.winfo_screenheight()
+        max_w = int(sw * 0.85)
+        max_h = int(sh * 0.75)
         preview = image.copy()
-        preview.thumbnail((420, 220))
+        preview.thumbnail((max_w, max_h))
         photo = ImageTk.PhotoImage(preview)
-        lbl = tk.Label(self.win, image=photo, bg='#1e1e2e')
+        lbl = tk.Label(self.win, image=photo, bg='#1e1e2e', bd=2, relief=tk.SOLID)
         lbl.image = photo
-        lbl.pack(pady=(16, 8), padx=16)
+        lbl.pack(pady=(12, 6), padx=12)
 
+        # Mensaje e info: en una sola linea pequena
         if copied_ok:
-            msg, color = "Ya esta COPIADO. Pega con Ctrl+V donde quieras.", "#00e676"
+            msg, color = "✅ Copiado (Ctrl+V para pegar)", "#00e676"
         else:
-            msg, color = "Capturado. Usa Guardar (no se pudo copiar).", "#ffb74d"
-        tk.Label(self.win, text=msg, font=("Arial", 11, "bold"), bg='#1e1e2e', fg=color).pack()
-        tk.Label(self.win, text=f"{image.size[0]} x {image.size[1]} px",
-                 font=("Arial", 9), bg='#1e1e2e', fg='#aaa').pack(pady=(2, 10))
+            msg, color = "Capturado (no se pudo copiar, usa Guardar)", "#ffb74d"
+        info = tk.Frame(self.win, bg='#1e1e2e')
+        info.pack()
+        tk.Label(info, text=msg, font=("Arial", 9, "bold"), bg='#1e1e2e', fg=color).pack(side=tk.LEFT)
+        tk.Label(info, text=f"   ·   {image.size[0]}x{image.size[1]} px",
+                 font=("Arial", 8), bg='#1e1e2e', fg='#888').pack(side=tk.LEFT)
 
+        # Botones PEQUENOS en una fila horizontal (ocupan poco espacio)
         btns = tk.Frame(self.win, bg='#1e1e2e')
-        btns.pack(pady=(0, 16), padx=16, fill=tk.X)
+        btns.pack(pady=(6, 12))
 
         def mkbtn(text, cmd, bg):
             tk.Button(btns, text=text, command=cmd, bg=bg, fg='white',
-                      font=("Arial", 11, "bold"), relief=tk.FLAT,
-                      padx=12, pady=10, cursor='hand2', activebackground=bg).pack(fill=tk.X, pady=4)
+                      font=("Arial", 9, "bold"), relief=tk.FLAT,
+                      padx=10, pady=5, cursor='hand2', activebackground=bg).pack(side=tk.LEFT, padx=4)
 
-        mkbtn("📋  Copiar de nuevo (Ctrl+V)", self._recopy, "#3949ab")
-        mkbtn("💾  Guardar en mi PC", self._save, "#00897b")
-        mkbtn("✅  Listo (cerrar)", self._close, "#c62828")
+        mkbtn("📋 Copiar", self._recopy, "#3949ab")
+        mkbtn("💾 Guardar", self._save, "#00897b")
+        mkbtn("❌ Descartar", self._close, "#c62828")
 
         self.win.update_idletasks()
         w, h = self.win.winfo_width(), self.win.winfo_height()
