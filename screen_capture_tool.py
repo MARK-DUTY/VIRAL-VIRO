@@ -131,8 +131,7 @@ def copy_image_to_clipboard(image) -> bool:
             "[System.Windows.Forms.Clipboard]::SetImage($img); "
             "$img.Dispose()"
         )
-        # -STA: el portapapeles requiere este modo de hilo en Windows
-        subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                        check=True, creationflags=NO_WINDOW)
         return True
     except Exception:  # noqa: BLE001
@@ -145,15 +144,13 @@ def copy_file_to_clipboard(path: str) -> bool:
     if sys.platform != "win32":
         return False
     try:
-        safe = path.replace("'", "''")
         ps = (
             "Add-Type -AssemblyName System.Windows.Forms; "
             "$c = New-Object System.Collections.Specialized.StringCollection; "
-            f"$c.Add('{safe}'); "
+            f"$c.Add('{path}'); "
             "[System.Windows.Forms.Clipboard]::SetFileDropList($c)"
         )
-        # -STA es OBLIGATORIO para copiar archivos al portapapeles
-        subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                        check=True, creationflags=NO_WINDOW)
         return True
     except Exception:  # noqa: BLE001
@@ -590,15 +587,10 @@ class VideoOptionsPopup:
         tk.Label(self.win, text=f"Tamano: {size_mb:.1f} MB",
                  font=("Arial", 9), bg="#1e1e2e", fg="#aaa").pack()
 
-        # Botones para VER el video o ABRIR su carpeta (para arrastrarlo)
-        top_btns = tk.Frame(self.win, bg="#1e1e2e")
-        top_btns.pack(pady=(10, 6))
-        tk.Button(top_btns, text="👁  Ver video", command=self._preview,
+        # Boton para VER el video (lo abre en el reproductor de Windows)
+        tk.Button(self.win, text="👁  Ver video", command=self._preview,
                   bg="#455a64", fg="white", font=("Arial", 9, "bold"),
-                  relief=tk.FLAT, padx=10, pady=5, cursor="hand2").pack(side=tk.LEFT, padx=4)
-        tk.Button(top_btns, text="📁  Abrir carpeta", command=self._open_folder,
-                  bg="#455a64", fg="white", font=("Arial", 9, "bold"),
-                  relief=tk.FLAT, padx=10, pady=5, cursor="hand2").pack(side=tk.LEFT, padx=4)
+                  relief=tk.FLAT, padx=10, pady=5, cursor="hand2").pack(pady=(10, 6))
 
         btns = tk.Frame(self.win, bg="#1e1e2e")
         btns.pack(pady=(4, 16), padx=16)
@@ -608,7 +600,7 @@ class VideoOptionsPopup:
                       font=("Arial", 9, "bold"), relief=tk.FLAT,
                       padx=10, pady=6, cursor="hand2", activebackground=bg).pack(side=tk.LEFT, padx=4)
 
-        mkbtn("📋 Copiar archivo", self._copy, "#3949ab")
+        mkbtn("📋 Copiar", self._copy, "#3949ab")
         mkbtn("💾 Guardar", self._save, "#00897b")
         mkbtn("❌ Descartar", self._discard, "#c62828")
 
@@ -624,24 +616,10 @@ class VideoOptionsPopup:
         except Exception:  # noqa: BLE001
             messagebox.showinfo("Video", f"El video esta en:\n{self.video_path}")
 
-    def _open_folder(self):
-        """Abre el Explorador con el video seleccionado para arrastrarlo."""
-        try:
-            subprocess.Popen(["explorer", "/select,", self.video_path])
-        except Exception:  # noqa: BLE001
-            messagebox.showinfo("Carpeta", f"El video esta en:\n{self.video_path}")
-
     def _copy(self):
         if copy_file_to_clipboard(self.video_path):
-            messagebox.showinfo(
-                "Video copiado",
-                "El video quedo copiado como ARCHIVO.\n\n"
-                "• Pega con Ctrl+V en: WhatsApp/Telegram de escritorio, correo,\n"
-                "  o en una carpeta del Explorador.\n\n"
-                "⚠ En paginas web (chats del navegador) a veces NO se puede pegar\n"
-                "un video. En ese caso usa '📁 Abrir carpeta' y ARRASTRA el archivo,\n"
-                "o usa '💾 Guardar' y adjuntalo.",
-            )
+            messagebox.showinfo("Copiado",
+                                "Video copiado. Pega con Ctrl+V en un chat o correo para enviarlo.")
         else:
             messagebox.showwarning("Aviso", "No se pudo copiar. Usa Guardar.")
 
