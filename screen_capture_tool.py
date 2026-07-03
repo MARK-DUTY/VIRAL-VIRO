@@ -243,8 +243,12 @@ def take_screenshot(parent, on_done):
 
     def _grab(x1, y1, x2, y2):
         try:
-            # all_screens=True permite capturar de CUALQUIER monitor
-            img = ImageGrab.grab(bbox=(x1, y1, x2, y2), all_screens=True)
+            # Capturamos TODO el escritorio (todas las pantallas) y recortamos
+            # con el origen correcto. Asi funciona aunque el 2do monitor este
+            # a la izquierda/arriba (coordenadas negativas).
+            vx, vy, _, _ = virtual_screen_bounds()
+            full = ImageGrab.grab(all_screens=True)
+            img = full.crop((x1 - vx, y1 - vy, x2 - vx, y2 - vy))
             copied = copy_image_to_clipboard(img)
             ImageOptionsPopup(parent, img, copied, on_done)
         except Exception as e:  # noqa: BLE001
@@ -733,5 +737,4 @@ class ProCamApp:
 
 
 if __name__ == "__main__":
-    _enable_dpi_awareness()   # coordenadas correctas con varias pantallas
     ProCamApp().run()
