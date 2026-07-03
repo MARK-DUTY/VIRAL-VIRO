@@ -26,8 +26,8 @@ if errorlevel 1 (
 )
 
 REM 2) Instalar librerias necesarias
-echo [1/4] Instalando librerias ^(Pillow, pystray^)... espera un momento.
-python -m pip install --user --quiet Pillow pystray
+echo [1/4] Instalando librerias ^(Pillow, pystray, keyboard^)... espera un momento.
+python -m pip install --user --quiet Pillow pystray keyboard
 echo       Librerias listas.
 echo.
 

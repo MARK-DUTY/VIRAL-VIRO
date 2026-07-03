@@ -19,8 +19,8 @@ if errorlevel 1 (
 )
 
 REM Instalar librerias necesarias (si ya estan, no pasa nada)
-echo Verificando librerias (Pillow, pystray)...
-python -m pip install --quiet --user Pillow pystray >nul 2>&1
+echo Verificando librerias (Pillow, pystray, keyboard)...
+python -m pip install --quiet --user Pillow pystray keyboard >nul 2>&1
 
 REM Verificar FFmpeg (para grabar video); si falta, lo descarga
 if not exist "%SCRIPT_DIR%ffmpeg\ffmpeg.exe" (

@@ -44,6 +44,16 @@ except ImportError:
     print("Falta la libreria 'pystray'. Instalala con:  pip install pystray")
     sys.exit(1)
 
+# 'keyboard' es opcional: sirve para el atajo global de video (Ctrl+Win+Alt).
+# Si no esta instalado, el programa funciona igual (solo sin el atajo).
+try:
+    import keyboard as _keyboard
+except Exception:  # noqa: BLE001
+    _keyboard = None
+
+# Atajo global para GRABAR VIDEO (se puede cambiar aqui)
+VIDEO_HOTKEY = "ctrl+windows+alt"
+
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
@@ -736,8 +746,28 @@ class ProCamApp:
         icon.stop()
         self.root.after(0, self.root.destroy)
 
+    def _register_hotkey(self):
+        """Registra el atajo global para grabar video (Ctrl+Win+Alt)."""
+        if _keyboard is None:
+            return
+        try:
+            _keyboard.add_hotkey(
+                VIDEO_HOTKEY,
+                lambda: self.root.after(0, self._hotkey_video),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _hotkey_video(self):
+        # Si ya esta grabando, el atajo DETIENE la grabacion
+        if self.active_recorder is not None:
+            self.active_recorder.stop()
+        else:
+            self._do_video()
+
     def run(self):
         threading.Thread(target=self.icon.run, daemon=True).start()
+        self._register_hotkey()
         self.root.mainloop()
 
 
