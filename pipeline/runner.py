@@ -181,6 +181,43 @@ def _scene_durations(scenes: list[Scene], total_duration: float) -> list[float]:
     return [total_duration * (c / total_words) for c in counts]
 
 
+def _sync_words_to_audio(
+    words: list[WordTiming], audio_duration: float
+) -> list[WordTiming]:
+    """
+    Corrige los tiempos de las palabras para que empaten con el audio REAL.
+
+    Edge TTS reporta el tiempo de cada palabra, pero cuando la voz va acelerada
+    (TTS_RATE positivo, ej. +8%) esos tiempos quedan en una linea de tiempo mas
+    larga que el audio que realmente se escucha. Eso hace que los subtitulos se
+    atrasen mas y mas conforme avanza el video.
+
+    Si el ultimo tiempo reportado es notablemente MAS LARGO que la duracion real
+    del audio, comprimimos TODOS los tiempos por el mismo factor. Asi los
+    subtitulos quedan sincronizados con la voz de principio a fin.
+
+    (Si los tiempos ya empatan con el audio, no cambia nada.)
+    """
+    if not words or audio_duration <= 0:
+        return words
+    reported = words[-1].end
+    # Solo corregimos si los tiempos van MAS LARGOS que el audio (caso "atrasado").
+    # El +0.2 evita tocar diferencias minimas (silencio final normal del audio).
+    if reported <= audio_duration + 0.2:
+        return words
+    factor = audio_duration / reported
+    print(f"[subtitulos] ajustando sincronia: x{factor:.3f} "
+          f"(reportado {reported:.1f}s -> audio real {audio_duration:.1f}s)")
+    return [
+        WordTiming(
+            word=w.word,
+            start=round(w.start * factor, 3),
+            end=round(w.end * factor, 3),
+        )
+        for w in words
+    ]
+
+
 def planned_scene_durations(prepared: "PreparedJob") -> list[float]:
     """
     Duracion (en segundos) que tendra cada escena en el video, segun el audio
@@ -812,9 +849,17 @@ def assemble_prepared(
         name=subtitle_color, position=subtitle_position, lead_sec=cfg.subtitle_lead
     )
     if prepared.audio_words:
-        print(f"[subtitulos] {len(prepared.audio_words)} palabras con tiempos exactos")
+        # AJUSTE DE SINCRONIA: Edge TTS marca el tiempo de cada palabra, pero
+        # cuando la voz va acelerada (TTS_RATE, ej. +8%) esos tiempos quedan en
+        # una linea de tiempo MAS LARGA que el audio real. Eso hace que los
+        # subtitulos se atrasen cada vez mas conforme avanza el video.
+        # Solucion: si el ultimo tiempo reportado es mas largo que el audio real,
+        # comprimimos TODOS los tiempos por el mismo factor para que empaten
+        # exactamente con el audio (sincronia perfecta de principio a fin).
+        words = _sync_words_to_audio(prepared.audio_words, prepared.real_duration)
+        print(f"[subtitulos] {len(words)} palabras con tiempos exactos")
         subs = build_ass_subtitles(
-            prepared.audio_words, job_dir / "subtitles.ass", style=sub_style,
+            words, job_dir / "subtitles.ass", style=sub_style,
             video_w=video_w, video_h=video_h,
         )
     else:
