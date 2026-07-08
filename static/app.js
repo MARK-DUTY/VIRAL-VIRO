@@ -56,7 +56,7 @@ function sharedOptions() {
   // Lo separamos en media_type ("image"|"video"|"mixed") y n_images ("auto"|numero).
   const planRaw = $("media_plan") ? $("media_plan").value : "image:auto";
   const [planType, planCount] = planRaw.split(":");
-  return {
+  const opts = {
     duration: $("duration").value,
     n_images: planCount || "auto",
     media_type: planType || "image",
@@ -69,6 +69,20 @@ function sharedOptions() {
     cta: $("cta").value,
     use_avatar: $("use_avatar").checked,
   };
+
+  // --- Avatar / estilo / podcast ---
+  const podcast = $("podcast-toggle") && $("podcast-toggle").checked;
+  if (podcast) {
+    opts.podcast = true;
+    opts.avatar_a_id = $("avatar-a-select") ? $("avatar-a-select").value : "";
+    opts.avatar_b_id = $("avatar-b-select") ? $("avatar-b-select").value : "";
+    opts.voice_a = $("voice-a") ? $("voice-a").value : "";
+    opts.voice_b = $("voice-b") ? $("voice-b").value : "";
+  } else {
+    opts.avatar_id = $("avatar-select") ? $("avatar-select").value : "";
+    opts.style_key = $("style-key") ? $("style-key").value : "";
+  }
+  return opts;
 }
 
 // Muestra un aviso cuando el usuario elige un video largo (2 min o mas),
@@ -339,6 +353,24 @@ function renderReview(review) {
 
     // Cuanto durara esta escena en el video (para que el usuario lo sepa).
     const durTxt = scene.duration ? `⏱️ ~${scene.duration}s` : "";
+    // Etiqueta de quien habla (modo podcast).
+    const speakerTxt = scene.speaker_name ? ` · 🎙️ ${escapeHtml(scene.speaker_name)}` : "";
+
+    // Bloque "usar audio de mi video" (solo si la escena es un video).
+    const ownAudioBlock = scene.can_own_audio ? `
+      <div class="own-audio-box" id="ownaudio-${scene.index}">
+        <label class="own-audio-toggle">
+          <input type="checkbox" id="ownaudio-chk-${scene.index}" ${scene.use_own_audio ? "checked" : ""}>
+          <span>🎧 Usar el <strong>audio de mi video</strong> en esta escena (el avatar NO habla aquí)</span>
+        </label>
+        <div class="own-audio-extra ${scene.use_own_audio ? "" : "hidden"}" id="ownaudio-extra-${scene.index}">
+          <span class="own-audio-dur" id="ownaudio-dur-${scene.index}">Esta escena durará lo que dure tu video${scene.own_audio_duration ? ` (~${scene.own_audio_duration}s)` : ""}.</span>
+          <label class="own-audio-vol">
+            <span>Volumen de tu video: <strong id="ownaudio-vollbl-${scene.index}">${Math.round((scene.own_audio_volume || 1) * 100)}%</strong></span>
+            <input type="range" min="0" max="150" value="${Math.round((scene.own_audio_volume || 1) * 100)}" id="ownaudio-vol-${scene.index}">
+          </label>
+        </div>
+      </div>` : "";
 
     // Todas las escenas tienen las MISMAS opciones, asi puedes cambiar
     // libremente cualquier escena entre foto y video.
@@ -349,9 +381,15 @@ function renderReview(review) {
         <span class="scene-dur" id="dur-${scene.index}">${durTxt}</span>
         <div class="scene-loading hidden" id="loading-${scene.index}">Generando...</div>
       </div>
-      <label class="scene-label">🎬 Escena ${scene.index + 1} · Diálogo (lo que se narra)</label>
+      <label class="scene-label">🎬 Escena ${scene.index + 1}${speakerTxt} · Diálogo (lo que se narra)</label>
       <textarea class="scene-dialogue" id="dialogue-${scene.index}" rows="3"
         title="Edita lo que se dice en esta escena">${escapeHtml(scene.text)}</textarea>
+      <div class="scene-play-row">
+        <button class="btn-mini btn-play" data-act="play" data-i="${scene.index}">▶️ Escuchar esta escena</button>
+        <span class="scene-play-status" id="playstatus-${scene.index}"></span>
+        <audio id="playaudio-${scene.index}" preload="none"></audio>
+      </div>
+      ${ownAudioBlock}
       <span class="scene-saved hidden" id="saved-${scene.index}">✔ Guardado</span>
       <label class="scene-label">🔎 Descripción (en inglés) · para imagen IA o para buscar foto/video</label>
       <textarea class="scene-prompt" id="prompt-${scene.index}" rows="2" spellcheck="false"
@@ -385,6 +423,23 @@ function renderReview(review) {
       btn.addEventListener("click", () => $(`file-${i}`).click());
     } else if (act === "delete") {
       btn.addEventListener("click", () => deleteScene(i));
+    } else if (act === "play") {
+      btn.addEventListener("click", () => previewScene(i));
+    }
+  });
+
+  // Controles de "usar audio de mi video" por escena
+  review.scenes.forEach((scene) => {
+    const i = scene.index;
+    const chk = $(`ownaudio-chk-${i}`);
+    if (chk) chk.addEventListener("change", () => toggleSceneOwnAudio(i, chk.checked));
+    const vol = $(`ownaudio-vol-${i}`);
+    if (vol) {
+      vol.addEventListener("input", () => {
+        const lbl = $(`ownaudio-vollbl-${i}`);
+        if (lbl) lbl.textContent = vol.value + "%";
+      });
+      vol.addEventListener("change", () => setSceneOwnAudioVolume(i, parseInt(vol.value, 10) / 100));
     }
   });
   // Guardar el dialogo automaticamente cuando el usuario termina de editar
@@ -892,6 +947,257 @@ document.addEventListener("click", function (e) {
 });
 
 // ----------------------------------------------------------------------
+//  ▶️ Escuchar el dialogo de UNA escena (con la voz que le toca)
+// ----------------------------------------------------------------------
+async function previewScene(i) {
+  const btn = document.querySelector(`#scene-${i} .btn-play`);
+  const status = $(`playstatus-${i}`);
+  const audio = $(`playaudio-${i}`);
+  if (!audio) return;
+
+  // Si ya esta sonando, lo detenemos (el boton sirve para play/stop).
+  if (!audio.paused) {
+    audio.pause();
+    audio.currentTime = 0;
+    if (btn) btn.textContent = "▶️ Escuchar esta escena";
+    if (status) status.textContent = "";
+    return;
+  }
+
+  const text = $(`dialogue-${i}`) ? $(`dialogue-${i}`).value.trim() : "";
+  if (!text) { if (status) status.textContent = "Esta escena no tiene diálogo."; return; }
+
+  if (status) status.textContent = "Generando audio...";
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await fetch("/api/preview_scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, text }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { if (status) status.textContent = "❌ " + (data.error || "No se pudo"); return; }
+    audio.src = data.audio_url + "?t=" + Date.now();
+    if (btn) btn.textContent = "⏹️ Detener";
+    if (status) status.textContent = "▶️ " + data.voice;
+    audio.onended = () => {
+      if (btn) btn.textContent = "▶️ Escuchar esta escena";
+      if (status) status.textContent = "";
+    };
+    await audio.play();
+  } catch (e) {
+    if (status) status.textContent = "❌ Error de conexión";
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ----------------------------------------------------------------------
+//  🎧 Usar el AUDIO PROPIO del video en una escena (Opcion A)
+// ----------------------------------------------------------------------
+async function toggleSceneOwnAudio(i, on) {
+  const extra = $(`ownaudio-extra-${i}`);
+  const vol = $(`ownaudio-vol-${i}`) ? parseInt($(`ownaudio-vol-${i}`).value, 10) / 100 : 1;
+  try {
+    const resp = await fetch("/api/scene_audio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, use_own_audio: on, volume: vol }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      alert(data.error || "No se pudo cambiar el audio de la escena.");
+      const chk = $(`ownaudio-chk-${i}`);
+      if (chk) chk.checked = !on;
+      return;
+    }
+    if (extra) extra.classList.toggle("hidden", !on);
+    if (on && data.own_audio_duration) {
+      const durlbl = $(`ownaudio-dur-${i}`);
+      if (durlbl) durlbl.textContent = `Esta escena durará lo que dure tu video (~${data.own_audio_duration}s).`;
+      const durbadge = $(`dur-${i}`);
+      if (durbadge) durbadge.textContent = `⏱️ ~${data.own_audio_duration}s`;
+    }
+  } catch (e) {
+    alert("Error: " + e);
+  }
+}
+
+async function setSceneOwnAudioVolume(i, val) {
+  try {
+    await fetch("/api/scene_audio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, use_own_audio: true, volume: val }),
+    });
+  } catch (e) { /* silencioso */ }
+}
+
+// ----------------------------------------------------------------------
+//  Avatares: selectores de voz, podcast y gestor (crear/editar/borrar)
+// ----------------------------------------------------------------------
+function voicePickerHtml() {
+  let html = "";
+  (window.VF_VOICES || []).forEach((v) => {
+    html += `<option value="${v.value}">${escapeHtml(v.label)}</option>`;
+  });
+  if ((window.VF_FOREIGN || []).length) {
+    html += `<optgroup label="🌍 Acento extranjero (experimental)">`;
+    window.VF_FOREIGN.forEach((v) => {
+      html += `<option value="${v.value}">${escapeHtml(v.label)}</option>`;
+    });
+    html += `</optgroup>`;
+  }
+  return html;
+}
+
+function fillVoicePickers() {
+  const html = voicePickerHtml();
+  document.querySelectorAll(".voice-picker").forEach((sel) => {
+    const prev = sel.value;
+    sel.innerHTML = html;
+    if (prev) sel.value = prev;
+  });
+}
+
+function refreshPodcastUI() {
+  const on = $("podcast-toggle") && $("podcast-toggle").checked;
+  if ($("podcast-box")) $("podcast-box").classList.toggle("hidden", !on);
+  if ($("single-avatar-box")) $("single-avatar-box").classList.toggle("hidden", on);
+}
+
+async function refreshAvatarDropdowns() {
+  try {
+    const resp = await fetch("/api/avatars");
+    const data = await resp.json();
+    const avatars = data.avatars || [];
+    const specs = [
+      ["avatar-select", "— Ninguno (usar la voz de arriba) —"],
+      ["avatar-a-select", "— Elegir voz manual —"],
+      ["avatar-b-select", "— Elegir voz manual —"],
+    ];
+    specs.forEach(([id, placeholder]) => {
+      const sel = $(id);
+      if (!sel) return;
+      const prev = sel.value;
+      let html = `<option value="">${placeholder}</option>`;
+      avatars.forEach((a) => {
+        html += `<option value="${a.id}">${escapeHtml(a.name)} · ${a.accent} · ${a.gender}</option>`;
+      });
+      sel.innerHTML = html;
+      sel.value = prev;
+    });
+  } catch (e) { /* silencioso */ }
+}
+
+function refreshAvatarCustomField() {
+  const custom = $("avatar-style") && $("avatar-style").value === "custom";
+  if ($("avatar-custom-field")) $("avatar-custom-field").style.display = custom ? "" : "none";
+}
+
+function clearAvatarEditor() {
+  if ($("avatar-edit-id")) $("avatar-edit-id").value = "";
+  if ($("avatar-name")) $("avatar-name").value = "";
+  if ($("avatar-custom")) $("avatar-custom").value = "";
+  if ($("avatar-editor-title")) $("avatar-editor-title").textContent = "➕ Nuevo avatar";
+  if ($("avatar-status")) $("avatar-status").textContent = "";
+  refreshAvatarCustomField();
+}
+
+function editAvatar(a) {
+  if ($("avatar-edit-id")) $("avatar-edit-id").value = a.id;
+  if ($("avatar-name")) $("avatar-name").value = a.name;
+  if ($("avatar-voice")) $("avatar-voice").value = a.voice;
+  if ($("avatar-style")) $("avatar-style").value = a.style;
+  if ($("avatar-custom")) $("avatar-custom").value = a.custom_style || "";
+  if ($("avatar-editor-title")) $("avatar-editor-title").textContent = "✏️ Editar: " + a.name;
+  refreshAvatarCustomField();
+  $("avatars-modal").scrollTop = $("avatars-modal").scrollHeight;
+}
+
+async function loadAvatarsList() {
+  try {
+    const resp = await fetch("/api/avatars");
+    const data = await resp.json();
+    const list = $("avatars-list");
+    if (!list) return;
+    list.innerHTML = "";
+    const avatars = data.avatars || [];
+    if (!avatars.length) {
+      list.innerHTML = `<p class="hint">Aún no tienes avatares. Crea el primero abajo. 👇</p>`;
+      return;
+    }
+    avatars.forEach((a) => {
+      const row = document.createElement("div");
+      row.className = "avatar-row";
+      row.dataset.json = JSON.stringify(a);
+      row.innerHTML = `
+        <span>🧑 <strong>${escapeHtml(a.name)}</strong> · ${a.accent} · ${a.gender}</span>
+        <span class="avatar-row-actions">
+          <button class="btn-mini" data-edit="1">✏️ Editar</button>
+          <button class="btn-mini btn-danger" data-del="${a.id}">🗑️</button>
+        </span>`;
+      list.appendChild(row);
+    });
+    list.querySelectorAll("[data-edit]").forEach((b) => {
+      b.addEventListener("click", () => editAvatar(JSON.parse(b.closest(".avatar-row").dataset.json)));
+    });
+    list.querySelectorAll("[data-del]").forEach((b) => {
+      b.addEventListener("click", () => deleteAvatar(b.dataset.del));
+    });
+  } catch (e) { /* silencioso */ }
+}
+
+async function saveAvatar() {
+  const id = $("avatar-edit-id") ? $("avatar-edit-id").value : "";
+  const status = $("avatar-status");
+  const payload = {
+    name: $("avatar-name").value.trim(),
+    voice: $("avatar-voice").value,
+    style: $("avatar-style").value,
+    custom_style: $("avatar-custom").value.trim(),
+  };
+  if (!payload.name) { status.textContent = "Ponle un nombre a tu avatar."; return; }
+  if (!payload.voice) { status.textContent = "Elige una voz."; return; }
+  try {
+    const url = id ? `/api/avatars/${id}` : "/api/avatars";
+    const method = id ? "PUT" : "POST";
+    const resp = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { status.textContent = "❌ " + (data.error || "No se pudo guardar"); return; }
+    status.textContent = "✔ Guardado";
+    clearAvatarEditor();
+    await loadAvatarsList();
+    await refreshAvatarDropdowns();
+  } catch (e) {
+    status.textContent = "❌ Error de conexión";
+  }
+}
+
+async function deleteAvatar(id) {
+  if (!confirm("¿Borrar este avatar?")) return;
+  try {
+    await fetch(`/api/avatars/${id}`, { method: "DELETE" });
+    await loadAvatarsList();
+    await refreshAvatarDropdowns();
+  } catch (e) { /* silencioso */ }
+}
+
+function openAvatarsModal() {
+  clearAvatarEditor();
+  loadAvatarsList();
+  fillVoicePickers();
+  $("avatars-modal").classList.remove("hidden");
+}
+function closeAvatarsModal() {
+  $("avatars-modal").classList.add("hidden");
+}
+
+// ----------------------------------------------------------------------
 //  Eventos
 // ----------------------------------------------------------------------
 $("tab-btn-url").addEventListener("click", () => switchTab("url"));
@@ -933,3 +1239,17 @@ if ($("duration")) {
   $("duration").addEventListener("change", refreshLongVideoWarning);
   refreshLongVideoWarning();
 }
+
+// --- Avatares / estilo / podcast ---
+if ($("podcast-toggle")) {
+  $("podcast-toggle").addEventListener("change", refreshPodcastUI);
+  refreshPodcastUI();
+}
+if ($("manage-avatars-btn")) $("manage-avatars-btn").addEventListener("click", openAvatarsModal);
+if ($("close-avatars-btn")) $("close-avatars-btn").addEventListener("click", closeAvatarsModal);
+if ($("save-avatar-btn")) $("save-avatar-btn").addEventListener("click", saveAvatar);
+if ($("cancel-avatar-btn")) $("cancel-avatar-btn").addEventListener("click", clearAvatarEditor);
+if ($("avatar-style")) $("avatar-style").addEventListener("change", refreshAvatarCustomField);
+
+// Poblar los selectores de voz (podcast manual + editor de avatares) al cargar.
+fillVoicePickers();

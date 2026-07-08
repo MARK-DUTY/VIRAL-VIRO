@@ -9,6 +9,7 @@ perfectamente sincronizados (estilo CapCut / videos virales).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -141,3 +142,72 @@ def synthesize_voice_sample(
             "(Edge TTS necesita internet) y que el nombre de la voz sea valido."
         )
     return out_path
+
+
+def synthesize_scene_preview(
+    text: str,
+    voice: str,
+    previews_dir: Path,
+    rate: str = "+0%",
+) -> Path:
+    """
+    Genera (o reutiliza) un audio con el TEXTO REAL de una escena y la voz
+    indicada, para que el usuario ESCUCHE escena por escena como sonara la
+    narracion (comas, entonacion, preguntas, exclamaciones) ANTES de armar el
+    video final.
+
+    Se guarda con un nombre basado en el HASH del (texto + voz + velocidad), asi:
+      - Si el dialogo NO cambio, la segunda vez suena al instante (cache).
+      - Si el usuario EDITA el dialogo, el hash cambia y se genera de nuevo
+        automaticamente con el texto nuevo.
+    """
+    voice = (voice or "").strip()
+    text = (text or "").strip()
+    if not voice:
+        raise ValueError("No se indico ninguna voz para la escena.")
+    if not text:
+        raise ValueError("Esta escena no tiene dialogo para escuchar.")
+
+    previews_dir = Path(previews_dir)
+    previews_dir.mkdir(parents=True, exist_ok=True)
+
+    key = hashlib.sha1(f"{voice}|{rate}|{text}".encode("utf-8")).hexdigest()[:20]
+    out_path = previews_dir / f"scene_{key}.mp3"
+
+    # Si ya lo generamos con el MISMO texto y voz, lo reutilizamos (instantaneo).
+    if out_path.exists() and out_path.stat().st_size > 0:
+        return out_path
+
+    asyncio.run(_synthesize(text, voice, rate, out_path))
+
+    if not out_path.exists() or out_path.stat().st_size == 0:
+        raise ValueError(
+            "No se pudo generar el audio de la escena. Revisa tu conexion a "
+            "internet (Edge TTS necesita internet) y que la voz sea valida."
+        )
+    return out_path
+
+
+# Voces EXTRANJERAS (hablantes no nativos) para el efecto "acento extranjero
+# hablando espanol" (experimental). No suenan tan naturales en espanol como las
+# voces nativas, pero dan ese toque de acento (chino, coreano, japones, ingles,
+# frances, italiano, aleman, brasileno). El usuario decide si le gusta.
+FOREIGN_ACCENT_VOICES = [
+    {"value": "zh-CN-XiaoxiaoNeural", "label": "Acento chino (mujer) · experimental"},
+    {"value": "zh-CN-YunxiNeural", "label": "Acento chino (hombre) · experimental"},
+    {"value": "ko-KR-SunHiNeural", "label": "Acento coreano (mujer) · experimental"},
+    {"value": "ko-KR-InJoonNeural", "label": "Acento coreano (hombre) · experimental"},
+    {"value": "ja-JP-NanamiNeural", "label": "Acento japones (mujer) · experimental"},
+    {"value": "ja-JP-KeitaNeural", "label": "Acento japones (hombre) · experimental"},
+    {"value": "en-US-JennyNeural", "label": "Acento ingles/gringo (mujer) · experimental"},
+    {"value": "en-US-GuyNeural", "label": "Acento ingles/gringo (hombre) · experimental"},
+    {"value": "fr-FR-DeniseNeural", "label": "Acento frances (mujer) · experimental"},
+    {"value": "it-IT-ElsaNeural", "label": "Acento italiano (mujer) · experimental"},
+    {"value": "de-DE-KatjaNeural", "label": "Acento aleman (mujer) · experimental"},
+    {"value": "pt-BR-FranciscaNeural", "label": "Acento brasileno (mujer) · experimental"},
+]
+
+
+def foreign_accent_options() -> list[dict]:
+    """Devuelve la lista de voces extranjeras (para el efecto de acento)."""
+    return list(FOREIGN_ACCENT_VOICES)

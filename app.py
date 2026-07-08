@@ -61,6 +61,7 @@ def _self_repair() -> None:
 
 _self_repair()
 
+from pipeline import personas as personas_mod
 from pipeline.config import settings
 from pipeline.runner import (
     add_scene,
@@ -73,10 +74,17 @@ from pipeline.runner import (
     prepare_youtube,
     regenerate_scene_image,
     set_scene_image,
+    set_scene_own_audio,
     update_scene_prompt,
     update_scene_text,
+    voice_for_scene,
 )
-from pipeline.voice import list_spanish_voices, synthesize_voice_sample
+from pipeline.voice import (
+    foreign_accent_options,
+    list_spanish_voices,
+    synthesize_scene_preview,
+    synthesize_voice_sample,
+)
 
 app = Flask(__name__)
 
@@ -141,6 +149,109 @@ def _resolve_preview_voice(voice: str) -> str:
     return _GENERIC_VOICE.get(key, voice.strip())
 
 
+def _resolve_persona_options(data: dict) -> dict:
+    """
+    A partir de lo que eligio el usuario (avatar guardado, estilo, o modo
+    podcast con dos avatares/voces), arma los parametros que necesitan las
+    funciones del pipeline:
+
+      - style_instructions, persona_name   (narrador unico)
+      - podcast, voice_a, voice_b, speaker_a_name, speaker_b_name  (modo podcast)
+      - voice_override: si se eligio un avatar, su voz manda sobre el menu "Voz".
+
+    Acepta en `data`:
+      avatar_id, style_key, podcast, avatar_a_id, avatar_b_id, voice_a, voice_b,
+      speaker_a_name, speaker_b_name
+    """
+    out: dict = {
+        "style_instructions": "",
+        "persona_name": "",
+        "podcast": False,
+        "voice_a": "",
+        "voice_b": "",
+        "speaker_a_name": "",
+        "speaker_b_name": "",
+        "voice_override": "",
+    }
+
+    podcast = bool(data.get("podcast"))
+
+    if podcast:
+        out["podcast"] = True
+        pa = personas_mod.get_persona(data.get("avatar_a_id") or "")
+        pb = personas_mod.get_persona(data.get("avatar_b_id") or "")
+
+        if pa:
+            out["voice_a"] = pa["voice"]
+            out["speaker_a_name"] = pa["name"]
+            style_a = personas_mod.style_instructions_for(pa["style"], pa.get("custom_style", ""))
+        else:
+            out["voice_a"] = (data.get("voice_a") or "").strip()
+            out["speaker_a_name"] = (data.get("speaker_a_name") or "Persona A").strip()
+            style_a = ""
+
+        if pb:
+            out["voice_b"] = pb["voice"]
+            out["speaker_b_name"] = pb["name"]
+            style_b = personas_mod.style_instructions_for(pb["style"], pb.get("custom_style", ""))
+        else:
+            out["voice_b"] = (data.get("voice_b") or "").strip()
+            out["speaker_b_name"] = (data.get("speaker_b_name") or "Persona B").strip()
+            style_b = ""
+
+        # Combinamos las personalidades de A y B en una sola instruccion para
+        # que la IA escriba a cada quien con su estilo.
+        blocks = []
+        if style_a:
+            blocks.append(f"La persona A ({out['speaker_a_name']}) habla asi: {style_a}")
+        if style_b:
+            blocks.append(f"La persona B ({out['speaker_b_name']}) habla asi: {style_b}")
+        out["style_instructions"] = " ".join(blocks)
+        return out
+
+    # --- Narrador unico ---
+    persona = personas_mod.get_persona(data.get("avatar_id") or "")
+    if persona:
+        out["persona_name"] = persona["name"]
+        out["voice_override"] = persona["voice"]
+        out["style_instructions"] = personas_mod.style_instructions_for(
+            persona["style"], persona.get("custom_style", "")
+        )
+    else:
+        # Sin avatar guardado: se puede elegir solo un estilo (preset).
+        style_key = (data.get("style_key") or "").strip()
+        if style_key:
+            out["style_instructions"] = personas_mod.style_instructions_for(style_key, "")
+    return out
+
+
+def _merge_persona_into_options(options: dict, data: dict) -> None:
+    """Resuelve avatar/podcast y lo guarda dentro de `options` (incluida la voz)."""
+    persona = _resolve_persona_options(data)
+    if persona["voice_override"]:
+        options["voice"] = persona["voice_override"]
+    options["style_instructions"] = persona["style_instructions"]
+    options["persona_name"] = persona["persona_name"]
+    options["podcast"] = persona["podcast"]
+    options["voice_a"] = persona["voice_a"]
+    options["voice_b"] = persona["voice_b"]
+    options["speaker_a_name"] = persona["speaker_a_name"]
+    options["speaker_b_name"] = persona["speaker_b_name"]
+
+
+def _persona_kwargs(options: dict) -> dict:
+    """Extrae de `options` los kwargs de personalidad/podcast para el pipeline."""
+    return {
+        "style_instructions": options.get("style_instructions", ""),
+        "persona_name": options.get("persona_name", ""),
+        "podcast": bool(options.get("podcast", False)),
+        "voice_a": options.get("voice_a", ""),
+        "voice_b": options.get("voice_b", ""),
+        "speaker_a_name": options.get("speaker_a_name", ""),
+        "speaker_b_name": options.get("speaker_b_name", ""),
+    }
+
+
 def _parse_urls(data: dict) -> list[str]:
     """
     Saca la lista de URLs del cuerpo de la peticion. Acepta:
@@ -172,6 +283,9 @@ def index():
         missing_keys=missing,
         avatar_enabled=settings.avatar_enabled,
         voice_options=voice_options,
+        foreign_voices=foreign_accent_options(),
+        persona_styles=personas_mod.style_options(),
+        avatars=personas_mod.list_personas(),
         defaults={
             "voice": settings.tts_voice,
             "rate": settings.tts_rate,
@@ -193,6 +307,15 @@ def _review_payload(job_id: str) -> dict:
     scenes = []
     for i, (scene, img) in enumerate(zip(prepared.scenes, prepared.images)):
         dur = round(durations[i], 1) if i < len(durations) else 0.0
+        is_video = bool(getattr(img, "is_video", False))
+        # Nombre a mostrar de quien habla (modo podcast) para el boton de play.
+        speaker = (getattr(scene, "speaker", "") or "").upper()
+        if prepared.podcast and speaker == "B":
+            speaker_name = prepared.speaker_b_name or "Persona B"
+        elif prepared.podcast:
+            speaker_name = prepared.speaker_a_name or "Persona A"
+        else:
+            speaker_name = ""
         scenes.append({
             "index": i,
             "text": scene.text,
@@ -200,8 +323,16 @@ def _review_payload(job_id: str) -> dict:
             "keyword": scene.keyword,
             "image_file": Path(img.path).name,
             "source": img.source,
-            "is_video": bool(getattr(img, "is_video", False)),
+            "is_video": is_video,
             "duration": dur,
+            # Audio propio del video (Opcion A)
+            "use_own_audio": bool(getattr(scene, "use_own_audio", False)),
+            "own_audio_volume": round(float(getattr(scene, "own_audio_volume", 1.0)), 2),
+            "own_audio_duration": round(float(getattr(scene, "own_audio_duration", 0.0)), 1),
+            "can_own_audio": is_video,   # solo tiene sentido si la escena es video
+            # Podcast: quien habla
+            "speaker": speaker,
+            "speaker_name": speaker_name,
         })
     return {
         "job_id": job_id,
@@ -214,6 +345,10 @@ def _review_payload(job_id: str) -> dict:
         "use_avatar": bool(job["options"].get("use_avatar", False)),
         "media_type": job["options"].get("media_type", "image"),
         "voice": prepared.voice,
+        "podcast": bool(prepared.podcast),
+        "persona_name": prepared.persona_name or "",
+        "speaker_a_name": prepared.speaker_a_name or "",
+        "speaker_b_name": prepared.speaker_b_name or "",
         "scenes": scenes,
     }
 
@@ -271,6 +406,7 @@ def api_prepare():
         "music_volume": float(data.get("music_volume") or 0.15),
         "aspect": data.get("aspect") or "9:16",
     }
+    _merge_persona_into_options(options, data)
     JOBS[job_id] = {
         "status": "running", "phase": "preparing", "message": "Iniciando...",
         "percent": 0, "error": None, "prepared": None, "options": options,
@@ -298,6 +434,7 @@ def _run_prepare(job_id: str, url, options: dict) -> None:
             image_source=options["image_source"],
             media_type=options.get("media_type", "image"),
             progress=progress,
+            **_persona_kwargs(options),
         )
         JOBS[job_id]["prepared"] = prepared
         JOBS[job_id]["phase"] = "review"
@@ -343,6 +480,7 @@ def api_prepare_youtube():
         "music_volume": float(data.get("music_volume") or 0.15),
         "aspect": data.get("aspect") or "9:16",
     }
+    _merge_persona_into_options(options, data)
     JOBS[job_id] = {
         "status": "running", "phase": "preparing", "message": "Iniciando...",
         "percent": 0, "error": None, "prepared": None, "options": options,
@@ -370,6 +508,7 @@ def _run_prepare_youtube(job_id: str, url, options: dict) -> None:
             image_source=options["image_source"],
             media_type=options.get("media_type", "image"),
             progress=progress,
+            **_persona_kwargs(options),
         )
         JOBS[job_id]["prepared"] = prepared
         JOBS[job_id]["phase"] = "review"
@@ -414,6 +553,7 @@ def api_draft_story():
         "music_volume": float(data.get("music_volume") or 0.15),
         "aspect": data.get("aspect") or "9:16",
     }
+    _merge_persona_into_options(options, data)
     JOBS[job_id] = {
         "status": "running", "phase": "drafting", "message": "Iniciando...",
         "percent": 0, "error": None, "prepared": None, "options": options,
@@ -440,6 +580,7 @@ def _run_draft(job_id: str, story: str, options: dict) -> None:
             image_source=options["image_source"],
             media_type=options.get("media_type", "image"),
             progress=progress,
+            **_persona_kwargs(options),
         )
         JOBS[job_id]["prepared"] = prepared
         JOBS[job_id]["phase"] = "draft"
@@ -829,6 +970,111 @@ def serve_voice_preview(filename: str):
 
 
 # --------------------------------------------------------------------------
+#  Escuchar el DIALOGO de UNA ESCENA (boton ▶️ de cada escena en la revision)
+# --------------------------------------------------------------------------
+@app.route("/api/preview_scene", methods=["POST"])
+def api_preview_scene():
+    """
+    Genera (o reutiliza) el audio del dialogo de una escena, con la voz que le
+    corresponde (la del avatar, o la voz A/B si es podcast), para que el usuario
+    ESCUCHE como sonara esa escena antes de armar el video. Si el usuario editó
+    el dialogo, se manda el texto nuevo y se regenera con ese texto.
+    """
+    data = request.get_json(force=True) or {}
+    job = JOBS.get(data.get("job_id"))
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    prepared = job["prepared"]
+    try:
+        index = int(data.get("index"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Escena invalida."}), 400
+    if index < 0 or index >= len(prepared.scenes):
+        return jsonify({"error": "Escena fuera de rango."}), 400
+
+    scene = prepared.scenes[index]
+    # Texto: el que viene del front (por si edito y no ha guardado) o el guardado.
+    text = (data.get("text") or scene.text or "").strip()
+    if not text:
+        return jsonify({"error": "Esta escena no tiene dialogo para escuchar."}), 400
+
+    # Voz: si el front manda una voz concreta, se usa; si no, la voz efectiva de
+    # la escena (avatar unico o la de quien habla en el podcast).
+    override = (data.get("voice") or "").strip()
+    voice = _resolve_preview_voice(override) if override else voice_for_scene(prepared, scene)
+    voice = _resolve_preview_voice(voice)   # asegura una voz concreta
+
+    try:
+        path = synthesize_scene_preview(text, voice, _PREVIEW_DIR, rate=prepared.rate)
+        return jsonify({
+            "ok": True,
+            "index": index,
+            "voice": voice,
+            "audio_url": f"/voice_preview/{path.name}",
+        })
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
+#  Marcar/desmarcar una escena para USAR EL AUDIO PROPIO de su video (Opcion A)
+# --------------------------------------------------------------------------
+@app.route("/api/scene_audio", methods=["POST"])
+def api_scene_audio():
+    data = request.get_json(force=True) or {}
+    job = JOBS.get(data.get("job_id"))
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        index = int(data.get("index"))
+        use = bool(data.get("use_own_audio"))
+        volume = data.get("volume")
+        result = set_scene_own_audio(job["prepared"], index, use, volume)
+        job["review"] = _review_payload(data.get("job_id"))
+        return jsonify({**result, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
+#  AVATARES personalizados (crear / listar / editar / borrar)
+# --------------------------------------------------------------------------
+@app.route("/api/avatars", methods=["GET", "POST"])
+def api_avatars():
+    if request.method == "GET":
+        return jsonify({"avatars": personas_mod.list_personas()})
+    data = request.get_json(force=True) or {}
+    if not (data.get("name") or "").strip():
+        return jsonify({"error": "Ponle un nombre a tu avatar."}), 400
+    if not (data.get("voice") or "").strip():
+        return jsonify({"error": "Elige una voz para tu avatar."}), 400
+    try:
+        created = personas_mod.create_persona(data)
+        return jsonify({"ok": True, "avatar": created})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/avatars/<persona_id>", methods=["PUT", "DELETE"])
+def api_avatar_detail(persona_id: str):
+    if request.method == "DELETE":
+        ok = personas_mod.delete_persona(persona_id)
+        if not ok:
+            return jsonify({"error": "No encontre ese avatar."}), 404
+        return jsonify({"ok": True})
+    data = request.get_json(force=True) or {}
+    try:
+        updated = personas_mod.update_persona(persona_id, data)
+        return jsonify({"ok": True, "avatar": updated})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
 #  Servir y descargar los videos finales
 # --------------------------------------------------------------------------
 @app.route("/video/<path:filename>")
@@ -850,7 +1096,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 21 (videos cortos 1-3 imagenes + escuchar voces)")
+    print("  VERSION DEL CODIGO: 22 (avatares + podcast + audio por escena + play por escena)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)

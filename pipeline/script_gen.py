@@ -251,12 +251,57 @@ _STYLE_DESC = {
 }
 
 
+def _persona_block(style_instructions: str) -> str:
+    """Bloque de instrucciones de PERSONALIDAD/TONO para el avatar (si aplica)."""
+    style_instructions = (style_instructions or "").strip()
+    if not style_instructions:
+        return ""
+    return (
+        "\nPERSONALIDAD DEL NARRADOR (MUY IMPORTANTE, aplica a TODO el guion):\n"
+        f"{style_instructions}\n"
+    )
+
+
+def _podcast_block(podcast: bool, speaker_a: str, speaker_b: str) -> str:
+    """
+    Bloque de instrucciones para el MODO PODCAST (dos personas conversando).
+    Le pedimos a la IA que escriba un dialogo alternado y que marque quien habla
+    en cada escena con el campo "speaker" ("A" o "B").
+    """
+    if not podcast:
+        return ""
+    a = (speaker_a or "Persona A").strip()
+    b = (speaker_b or "Persona B").strip()
+    return (
+        "\nMODO PODCAST (dos personas conversando):\n"
+        f"- El guion es una CONVERSACION natural entre dos personas: A = {a} y B = {b}.\n"
+        "- Se van turnando: se hacen preguntas, se responden, comentan y reaccionan "
+        "entre ellos, como en un podcast. Que suene a platica real, no a que cada uno "
+        "lea un parrafo suelto.\n"
+        "- CADA escena tiene UNA sola intervencion (una persona). Alterna A, B, A, B... "
+        "aunque a veces una persona puede hablar dos escenas seguidas si es natural.\n"
+        '- En CADA escena agrega el campo "speaker" con el valor "A" o "B" segun quien habla.\n'
+    )
+
+
+def _speaker_json_hint(podcast: bool) -> str:
+    """Fragmento del ejemplo JSON que agrega el campo speaker si es podcast."""
+    return '"speaker": "A",\n      ' if podcast else ""
+
+
 @dataclass
 class Scene:
     """Una escena del video: su texto narrado + como debe verse la imagen."""
     text: str
     image_prompt: str   # descripcion detallada en ingles para generar imagen IA
     keyword: str        # termino corto en ingles para buscar foto de stock
+    # --- Modo PODCAST: quien habla en esta escena ("A" o "B"). "" = normal. ---
+    speaker: str = ""
+    # --- VIDEO PROPIO con su propio audio (Opcion A): si es True, esta escena
+    #     NO la narra el avatar; se usa el audio del video subido y su duracion. ---
+    use_own_audio: bool = False
+    own_audio_volume: float = 1.0   # volumen del audio del video (0.0 a 1.0)
+    own_audio_duration: float = 0.0  # duracion (seg) del video subido (cacheada)
 
 
 @dataclass
@@ -277,7 +322,17 @@ class VideoScript:
         return [s.keyword for s in self.scenes if s.keyword]
 
 
-def _build_prompt(article: Article, duration: int, style: str, cta: str, n_scenes: int) -> list[dict]:
+def _build_prompt(
+    article: Article,
+    duration: int,
+    style: str,
+    cta: str,
+    n_scenes: int,
+    style_instructions: str = "",
+    podcast: bool = False,
+    speaker_a: str = "",
+    speaker_b: str = "",
+) -> list[dict]:
     target_words = int(duration * _WORDS_PER_SECOND)
     min_words = max(1, target_words - _tolerance_words(duration))
     style_desc = _STYLE_DESC.get(style, _STYLE_DESC["breaking"])
@@ -314,7 +369,7 @@ REQUISITOS:
 - La PRIMERA escena debe ser un GANCHO que enganche en los primeros 3 segundos.
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
-
+{_persona_block(style_instructions)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
   concreta, una imagen que represente EXACTAMENTE lo que se narra en esa escena.
@@ -330,7 +385,7 @@ DEVUELVE EXCLUSIVAMENTE UN JSON con esta forma EXACTA (sin texto extra):
   "scenes": [
     {{
       "text": "parte del guion que se narra en esta escena",
-      "image_prompt": "detailed English visual description of the scene, photorealistic",
+      {_speaker_json_hint(podcast)}"image_prompt": "detailed English visual description of the scene, photorealistic",
       "keyword": "short english stock term"
     }}
   ],
@@ -344,7 +399,16 @@ DEVUELVE EXCLUSIVAMENTE UN JSON con esta forma EXACTA (sin texto extra):
     ]
 
 
-def _build_story_prompt(story: str, duration: int, n_images: int, cta: str) -> list[dict]:
+def _build_story_prompt(
+    story: str,
+    duration: int,
+    n_images: int,
+    cta: str,
+    style_instructions: str = "",
+    podcast: bool = False,
+    speaker_a: str = "",
+    speaker_b: str = "",
+) -> list[dict]:
     """
     Construye el prompt para cuando el usuario ESCRIBE su propia historia
     (en vez de pegar una noticia). Pedimos un minimo de imagenes/escenas.
@@ -383,7 +447,7 @@ REQUISITOS:
 - La PRIMERA escena debe ser un GANCHO que enganche en los primeros 3 segundos.
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
-
+{_persona_block(style_instructions)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
   concreta, una imagen que represente EXACTAMENTE lo que se narra en esa escena,
@@ -396,7 +460,7 @@ DEVUELVE EXCLUSIVAMENTE UN JSON con esta forma EXACTA (sin texto extra):
   "scenes": [
     {{
       "text": "parte del guion que se narra en esta escena",
-      "image_prompt": "detailed English visual description of the scene, photorealistic",
+      {_speaker_json_hint(podcast)}"image_prompt": "detailed English visual description of the scene, photorealistic",
       "keyword": "short english stock term"
     }}
   ],
@@ -594,7 +658,11 @@ def _parse_script(parsed: dict) -> VideoScript:
             continue
         image_prompt = (s.get("image_prompt") or "").strip() or text
         keyword = (s.get("keyword") or "").strip() or image_prompt
-        scenes.append(Scene(text=text, image_prompt=image_prompt, keyword=keyword))
+        # speaker: "A"/"B" en modo podcast (si viene). Normalizamos a mayuscula.
+        speaker = (str(s.get("speaker") or "").strip().upper())
+        if speaker not in ("A", "B"):
+            speaker = ""
+        scenes.append(Scene(text=text, image_prompt=image_prompt, keyword=keyword, speaker=speaker))
 
     if not scenes:
         raise ValueError("La IA no genero escenas. Intenta de nuevo.")
@@ -650,8 +718,8 @@ def _enforce_scene_count(scenes: list[Scene], target: int) -> None:
         first = " ".join(words[:mid]).strip()
         second = " ".join(words[mid:]).strip()
         base = scenes[idx]
-        scenes[idx] = Scene(text=first, image_prompt=base.image_prompt, keyword=base.keyword)
-        scenes.insert(idx + 1, Scene(text=second, image_prompt=base.image_prompt, keyword=base.keyword))
+        scenes[idx] = Scene(text=first, image_prompt=base.image_prompt, keyword=base.keyword, speaker=base.speaker)
+        scenes.insert(idx + 1, Scene(text=second, image_prompt=base.image_prompt, keyword=base.keyword, speaker=base.speaker))
 
 
 def _reduce_scene_count(scenes: list[Scene], target: int) -> None:
@@ -682,6 +750,7 @@ def _reduce_scene_count(scenes: list[Scene], target: int) -> None:
             text=(a.text.strip() + " " + b.text.strip()).strip(),
             image_prompt=(a.image_prompt or b.image_prompt),
             keyword=(a.keyword or b.keyword),
+            speaker=(a.speaker or b.speaker),
         )
         scenes[best_i] = merged
         del scenes[best_i + 1]
@@ -718,6 +787,7 @@ def _fit_length_and_scenes(
     source_kind: str,
     suggestion: str,
     exact_scene_count: bool = False,
+    podcast: bool = False,
 ) -> VideoScript:
     """
     Ajusta el guion a la duracion pedida:
@@ -732,6 +802,17 @@ def _fit_length_and_scenes(
     """
     target_words = int(duration * _WORDS_PER_SECOND)
     tol_words = _tolerance_words(duration)
+
+    # MODO PODCAST: NO reformamos la estructura (ni expandir, ni partir, ni
+    # fusionar), porque cada escena es la intervencion de una persona (con su
+    # "speaker") y reordenarla romperia la conversacion. Solo recalculamos la
+    # narracion y el aviso.
+    if podcast:
+        script.narration = " ".join(s.text for s in script.scenes if s.text.strip()).strip()
+        script.warning = _coverage_warning(
+            _count_words(script.scenes), target_words, tol_words, duration, suggestion
+        )
+        return script
 
     # 1) EXPANDIR si quedo corto (la IA casi siempre se queda corta)
     tries = 0
@@ -782,10 +863,16 @@ def generate_script(
     cta: str | None = None,
     n_images=None,
     timeout: int = 60,
+    style_instructions: str = "",
+    podcast: bool = False,
+    speaker_a: str = "",
+    speaker_b: str = "",
 ) -> VideoScript:
     """Llama a Groq y devuelve un VideoScript con escenas listo para usar (desde NOTICIA).
 
     n_images: cuantas fotos quiere el usuario ("auto" o un numero entre 8 y 40).
+    style_instructions: tono/personalidad del avatar (opcional).
+    podcast: si True, genera un dialogo entre dos personas (speaker A/B).
     """
     duration = duration or settings.video_duration
     style = style or settings.script_style
@@ -798,7 +885,11 @@ def generate_script(
     src_chars = min(16000, max(6000, target_words * 25))
     max_tokens = _tokens_for(duration)
 
-    messages = _build_prompt(article, duration, style, cta, n_scenes)
+    messages = _build_prompt(
+        article, duration, style, cta, n_scenes,
+        style_instructions=style_instructions,
+        podcast=podcast, speaker_a=speaker_a, speaker_b=speaker_b,
+    )
     script = _parse_script(_call_groq(messages, timeout=timeout, max_tokens=max_tokens))
 
     script = _fit_length_and_scenes(
@@ -815,6 +906,7 @@ def generate_script(
         source_kind="noticia",
         suggestion="Agrega otra URL de noticia (una por renglon) o mas contexto y vuelve a generar.",
         exact_scene_count=exact,
+        podcast=podcast,
     )
     print(
         f"[guion] {len(script.scenes)} escenas, ~{_count_words(script.scenes)} palabras "
@@ -830,6 +922,10 @@ def generate_script_from_story(
     n_images=8,
     cta: str | None = None,
     timeout: int = 60,
+    style_instructions: str = "",
+    podcast: bool = False,
+    speaker_a: str = "",
+    speaker_b: str = "",
 ) -> VideoScript:
     """
     Llama a Groq y devuelve un VideoScript a partir de una HISTORIA escrita
@@ -854,7 +950,11 @@ def generate_script_from_story(
     target_words = int(duration * _WORDS_PER_SECOND)
     max_tokens = _tokens_for(duration)
 
-    messages = _build_story_prompt(story, duration, n_scenes, cta)
+    messages = _build_story_prompt(
+        story, duration, n_scenes, cta,
+        style_instructions=style_instructions,
+        podcast=podcast, speaker_a=speaker_a, speaker_b=speaker_b,
+    )
     script = _parse_script(_call_groq(messages, timeout=timeout, max_tokens=max_tokens))
 
     script = _fit_length_and_scenes(
@@ -871,6 +971,7 @@ def generate_script_from_story(
         source_kind="historia",
         suggestion="Agrega mas detalles a tu historia y vuelve a generar.",
         exact_scene_count=exact,
+        podcast=podcast,
     )
     print(
         f"[historia] {len(script.scenes)} escenas, ~{_count_words(script.scenes)} palabras "
