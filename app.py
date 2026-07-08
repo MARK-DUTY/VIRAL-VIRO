@@ -34,6 +34,9 @@ _RAW_BASE = "https://raw.githubusercontent.com/MARK-DUTY/VIROFEED-PERSONAL/main"
 _REQUIRED_FILES = {
     "pipeline/music.py": None,
     "pipeline/youtube.py": "def extract_youtubes",
+    # Archivo NUEVO (avatares/estilos/podcast). Si el actualizar.bat viejo no lo
+    # trajo, lo bajamos solos para que el programa no falle al abrir.
+    "pipeline/personas.py": "def list_personas",
 }
 
 
