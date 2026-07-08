@@ -11,7 +11,9 @@ Luego abre:      http://localhost:5000
 """
 from __future__ import annotations
 
+import json
 import re
+import sys
 import threading
 import traceback
 import uuid
@@ -34,9 +36,6 @@ _RAW_BASE = "https://raw.githubusercontent.com/MARK-DUTY/VIROFEED-PERSONAL/main"
 _REQUIRED_FILES = {
     "pipeline/music.py": None,
     "pipeline/youtube.py": "def extract_youtubes",
-    # Archivo NUEVO (avatares/estilos/podcast). Si el actualizar.bat viejo no lo
-    # trajo, lo bajamos solos para que el programa no falle al abrir.
-    "pipeline/personas.py": "def list_personas",
 }
 
 
@@ -64,7 +63,6 @@ def _self_repair() -> None:
 
 _self_repair()
 
-from pipeline import personas as personas_mod
 from pipeline.config import settings
 from pipeline.runner import (
     add_scene,
@@ -90,6 +88,219 @@ from pipeline.voice import (
 )
 
 app = Flask(__name__)
+
+
+# ==========================================================================
+#  AVATARES / PERSONAJES (antes en pipeline/personas.py, ahora AQUI dentro).
+#  Se movio a app.py a proposito: el actualizar.bat viejo baja una lista fija
+#  de archivos que NO incluye personas.py, y descargarlo aparte fallaba por el
+#  limite de GitHub (429). Como app.py SIEMPRE se descarga, aqui nunca falta.
+#
+#  Un "avatar" es una PERSONALIDAD guardada: nombre + voz (que define el acento
+#  por pais) + estilo de hablar (serio, chismoso, galan...). El estilo cambia
+#  COMO ESCRIBE la IA el guion; el acento lo pone la voz elegida.
+# ==========================================================================
+STYLE_PRESETS: dict[str, dict] = {
+    "neutral": {"label": "Normal / neutral", "instructions": ""},
+    "serio_noticiero": {
+        "label": "Noticiero serio (formal)",
+        "instructions": (
+            "Escribe con un tono FORMAL, serio y profesional, como un presentador "
+            "de noticiero nocturno de television. Frases claras y con autoridad, "
+            "vocabulario correcto, sin bromas ni palabras coloquiales. Transmite "
+            "credibilidad y seriedad."
+        ),
+    },
+    "comico": {
+        "label": "Comico / relajiento",
+        "instructions": (
+            "Escribe con MUCHO humor, ocurrente y exagerado, como un personaje de "
+            "comedia de television mexicana. Usa expresiones chistosas, doble "
+            "sentido ligero (sin groserias) y comentarios divertidos, pero sin "
+            "perder el hilo de lo que se cuenta. Que de risa y sea muy expresivo."
+        ),
+    },
+    "espectaculos": {
+        "label": "Espectaculos / farandula",
+        "instructions": (
+            "Escribe con el tono animado y chismoso de un programa de espectaculos "
+            "y farandula. Muy emocionado, curioso, con exclamaciones y frases de "
+            "'no lo vas a creer'. Genera intriga y mantiene la atencion como en un "
+            "programa de chismes de la tele."
+        ),
+    },
+    "chismosa": {
+        "label": "Vecina chismosa",
+        "instructions": (
+            "Escribe como una vecina chismosa contando el chisme del barrio: "
+            "confianzuda, exagerada, curiosa y con mucho drama. Usa expresiones de "
+            "'ay comadre', 'no me lo vas a creer', 'te cuento'. Muy coloquial y "
+            "entretenida, como platicando en la esquina."
+        ),
+    },
+    "galan": {
+        "label": "Galan presumido",
+        "instructions": (
+            "Escribe como un galan presumido, coqueto y muy seguro de si mismo. "
+            "Tono seductor y confiado, se echa flores, habla con actitud de "
+            "conquistador simpatico (sin faltar al respeto). Que suene carismatico "
+            "y un poco payaso."
+        ),
+    },
+    "motivador": {
+        "label": "Motivador / coach",
+        "instructions": (
+            "Escribe con energia positiva y motivadora, como un coach que inspira. "
+            "Frases que animan, con fuerza y entusiasmo, que dejan al espectador "
+            "con ganas de actuar."
+        ),
+    },
+    "dramatico": {
+        "label": "Dramatico / suspenso",
+        "instructions": (
+            "Escribe con tono dramatico y de suspenso, como narrador de historias "
+            "de misterio. Crea tension, pausas de intriga y un final que sorprenda."
+        ),
+    },
+}
+
+DEFAULT_STYLE = "neutral"
+
+_PERSONA_ACCENTS: dict[str, str] = {
+    "es-MX": "Mexico", "es-ES": "Espana", "es-AR": "Argentina",
+    "es-CO": "Colombia", "es-US": "Estados Unidos", "es-CL": "Chile",
+    "es-PE": "Peru", "es-VE": "Venezuela", "es-EC": "Ecuador",
+    "es-GT": "Guatemala", "es-CR": "Costa Rica", "es-PA": "Panama",
+    "es-DO": "Rep. Dominicana", "es-UY": "Uruguay", "es-PY": "Paraguay",
+    "es-BO": "Bolivia", "es-SV": "El Salvador", "es-HN": "Honduras",
+    "es-NI": "Nicaragua", "es-PR": "Puerto Rico", "es-CU": "Cuba",
+    "es-GQ": "Guinea Ecuatorial",
+}
+
+_PERSONA_FEMALE_NAMES = {
+    "dalia", "elvira", "salome", "paloma", "larissa", "ximena", "sabina",
+    "tania", "marisol", "yolanda", "nuria", "renata", "emilia", "julia",
+    "camila", "valentina", "abril", "luciana", "catalina", "amanda",
+    "estrella", "vera", "marta", "irene", "xiaoxiao", "sunhi", "nanami",
+    "jenny", "denise", "elsa", "katja", "francisca",
+}
+
+_PERSONAS_LOCK = threading.Lock()
+
+
+def style_options() -> list[dict]:
+    """Lista de estilos para el menu de la interfaz."""
+    return [{"value": k, "label": v["label"]} for k, v in STYLE_PRESETS.items()]
+
+
+def style_instructions_for(style: str, custom_style: str = "") -> str:
+    """Instrucciones de TONO para inyectar en el prompt de la IA."""
+    if (style or "").strip().lower() == "custom":
+        return (custom_style or "").strip()
+    preset = STYLE_PRESETS.get((style or "").strip().lower())
+    return preset["instructions"] if preset else ""
+
+
+def _persona_country_for_voice(voice: str) -> str:
+    locale = "-".join((voice or "").split("-")[:2])
+    return _PERSONA_ACCENTS.get(locale, locale or "Espanol")
+
+
+def _persona_looks_female(voice: str) -> bool:
+    name = (voice or "").lower()
+    return any(fn in name for fn in _PERSONA_FEMALE_NAMES)
+
+
+def _personas_store_path() -> Path:
+    return settings.work_dir / "avatars.json"
+
+
+def _personas_load_all() -> list[dict]:
+    path = _personas_store_path()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+    except Exception:  # noqa: BLE001
+        pass
+    return []
+
+
+def _personas_save_all(items: list[dict]) -> None:
+    path = _personas_store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _persona_clean(persona: dict) -> dict:
+    name = (persona.get("name") or "").strip() or "Avatar sin nombre"
+    voice = (persona.get("voice") or "").strip() or settings.tts_voice
+    style = (persona.get("style") or DEFAULT_STYLE).strip()
+    custom_style = (persona.get("custom_style") or "").strip()
+    gender = (persona.get("gender") or "").strip().lower()
+    if gender not in ("hombre", "mujer"):
+        gender = "mujer" if _persona_looks_female(voice) else "hombre"
+    return {
+        "id": persona.get("id") or uuid.uuid4().hex[:12],
+        "name": name,
+        "voice": voice,
+        "style": style,
+        "custom_style": custom_style,
+        "gender": gender,
+        "accent": _persona_country_for_voice(voice),
+    }
+
+
+def list_personas() -> list[dict]:
+    with _PERSONAS_LOCK:
+        return [_persona_clean(p) for p in _personas_load_all()]
+
+
+def get_persona(persona_id: str) -> dict | None:
+    if not persona_id:
+        return None
+    for p in list_personas():
+        if p["id"] == persona_id:
+            return p
+    return None
+
+
+def create_persona(persona: dict) -> dict:
+    with _PERSONAS_LOCK:
+        items = _personas_load_all()
+        new = _persona_clean({**persona, "id": None})
+        items.append(new)
+        _personas_save_all(items)
+        return new
+
+
+def update_persona(persona_id: str, persona: dict) -> dict:
+    with _PERSONAS_LOCK:
+        items = _personas_load_all()
+        for i, p in enumerate(items):
+            if (p.get("id") or "") == persona_id:
+                merged = _persona_clean({**p, **persona, "id": persona_id})
+                items[i] = merged
+                _personas_save_all(items)
+                return merged
+    raise ValueError("No encontre ese avatar para actualizar.")
+
+
+def delete_persona(persona_id: str) -> bool:
+    with _PERSONAS_LOCK:
+        items = _personas_load_all()
+        remaining = [p for p in items if (p.get("id") or "") != persona_id]
+        if len(remaining) == len(items):
+            return False
+        _personas_save_all(remaining)
+        return True
+
+
+# `personas_mod` apunta a ESTE mismo modulo, para que el resto del codigo pueda
+# seguir llamando `personas_mod.list_personas()`, etc., sin cambios.
+personas_mod = sys.modules[__name__]
 
 
 # Nombres de pais por codigo de idioma, para mostrar voces de forma amigable
