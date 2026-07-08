@@ -25,7 +25,16 @@ try:
 except Exception:  # si falta music.py, el programa sigue funcionando (sin musica automatica)
     music_mod = None
 from .article import extract_article, extract_articles
-from .assemble import build_video, probe_duration, resolution_for
+from .assemble import (
+    build_video,
+    concat_audio,
+    extract_audio,
+    has_audio_stream,
+    make_silence,
+    normalize_audio,
+    probe_duration,
+    resolution_for,
+)
 from .config import settings
 from .images import ImageResult, fetch_scene_images, fetch_scene_videos, fetch_single_image, fetch_single_video
 from .script_gen import Scene, ensure_english, generate_script, generate_script_from_story
@@ -151,6 +160,15 @@ class PreparedJob:
     voice: str = "es-MX-JorgeNeural"
     rate: str = "+0%"
     synth_narration: str = ""           # narracion con la que se genero el audio actual
+    # --- MODO PODCAST: dos voces (A y B) conversando. ---
+    podcast: bool = False
+    voice_a: str = ""                   # voz de la persona A (si podcast)
+    voice_b: str = ""                   # voz de la persona B (si podcast)
+    speaker_a_name: str = ""            # nombre del avatar A (para mostrar)
+    speaker_b_name: str = ""            # nombre del avatar B (para mostrar)
+    # --- PERSONALIDAD del narrador (avatar): instrucciones de tono para la IA. ---
+    style_instructions: str = ""
+    persona_name: str = ""              # nombre del avatar elegido (para mostrar)
     # Musica de fondo opcional (la sube el usuario). None = sin musica.
     music_path: Path | None = None
     # Memoria de fotos de stock ya mostradas, por escena (para que "Otra foto"
@@ -181,15 +199,52 @@ def _scene_durations(scenes: list[Scene], total_duration: float) -> list[float]:
     return [total_duration * (c / total_words) for c in counts]
 
 
+def voice_for_scene(prepared: "PreparedJob", scene: Scene) -> str:
+    """
+    Devuelve que VOZ debe usar una escena:
+      - En modo PODCAST: la voz A o la voz B segun quien habla (scene.speaker).
+      - En modo normal: la voz unica del trabajo.
+    """
+    if prepared.podcast:
+        if (scene.speaker or "").upper() == "B" and prepared.voice_b:
+            return prepared.voice_b
+        return prepared.voice_a or prepared.voice
+    return prepared.voice
+
+
 def planned_scene_durations(prepared: "PreparedJob") -> list[float]:
     """
     Duracion (en segundos) que tendra cada escena en el video, segun el audio
     actual. Se usa para MOSTRARLE al usuario cuanto durara cada imagen/video en
     la pantalla de revision. Si aun no hay audio, devuelve ceros.
+
+    Las escenas marcadas con "usar el audio de mi video" (use_own_audio) duran
+    lo que dura el video subido (own_audio_duration), no lo que se reparte de la
+    voz del avatar.
     """
-    if not prepared.scenes or prepared.real_duration <= 0:
-        return [0.0] * len(prepared.scenes)
-    return _scene_durations(prepared.scenes, prepared.real_duration)
+    n = len(prepared.scenes)
+    if n == 0:
+        return []
+
+    # Escenas que narra el avatar (TTS) vs. escenas con audio propio del video.
+    tts_scenes = [s for s in prepared.scenes if not s.use_own_audio]
+    tts_total = prepared.real_duration
+    if tts_total <= 0:
+        base = [0.0] * n
+    else:
+        # Repartimos la duracion de la voz SOLO entre las escenas de avatar.
+        counts = [max(1, len(s.text.split())) for s in tts_scenes]
+        total_words = sum(counts) or 1
+        base = []
+        ti = 0
+        for s in prepared.scenes:
+            if s.use_own_audio:
+                base.append(round(s.own_audio_duration or 0.0, 1))
+            else:
+                dur = tts_total * (counts[ti] / total_words)
+                ti += 1
+                base.append(dur)
+    return base
 
 
 def _fetch_media(
@@ -232,6 +287,13 @@ def prepare_video(
     image_source: str | None = None,
     media_type: str = "image",
     progress: ProgressFn = _noop,
+    style_instructions: str = "",
+    persona_name: str = "",
+    podcast: bool = False,
+    voice_a: str = "",
+    voice_b: str = "",
+    speaker_a_name: str = "",
+    speaker_b_name: str = "",
 ) -> PreparedJob:
     cfg = settings
     # `url` puede ser un solo enlace (texto) o varios (lista). Normalizamos.
@@ -243,6 +305,12 @@ def prepare_video(
     style = style or cfg.script_style
     cta = cta or cfg.call_to_action
     image_source = (image_source or cfg.image_source or "hybrid").lower()
+
+    # En modo podcast, la voz "principal" es la de la persona A (para la muestra).
+    if podcast:
+        voice_a = _resolve_voice(voice_a or voice)
+        voice_b = _resolve_voice(voice_b or cfg.tts_voice)
+        voice = voice_a
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     job_dir = cfg.work_dir / f"job_{stamp}"
@@ -256,10 +324,15 @@ def prepare_video(
 
     # 2) Guion en escenas
     progress("Escribiendo el guion viral con IA...", 25)
-    script = generate_script(article, duration=duration, style=style, cta=cta, n_images=n_images)
+    script = generate_script(
+        article, duration=duration, style=style, cta=cta, n_images=n_images,
+        style_instructions=style_instructions,
+        podcast=podcast, speaker_a=speaker_a_name, speaker_b=speaker_b_name,
+    )
     print(f"[guion] {len(script.scenes)} escenas generadas")
 
-    # 3) Voz
+    # 3) Voz (muestra inicial con una sola voz; el ensamblaje final la ajusta
+    #    por escena si es podcast o hay audio propio de video).
     progress("Generando la voz en espanol...", 45)
     audio = synthesize_voice(
         script.narration, voice=voice, rate=rate, out_path=job_dir / "voz.mp3"
@@ -290,6 +363,13 @@ def prepare_video(
         voice=voice,
         rate=rate,
         synth_narration=script.narration,
+        podcast=podcast,
+        voice_a=voice_a,
+        voice_b=voice_b,
+        speaker_a_name=speaker_a_name,
+        speaker_b_name=speaker_b_name,
+        style_instructions=style_instructions,
+        persona_name=persona_name,
     )
 
 
@@ -308,6 +388,13 @@ def prepare_youtube(
     image_source: str | None = None,
     media_type: str = "image",
     progress: ProgressFn = _noop,
+    style_instructions: str = "",
+    persona_name: str = "",
+    podcast: bool = False,
+    voice_a: str = "",
+    voice_b: str = "",
+    speaker_a_name: str = "",
+    speaker_b_name: str = "",
 ) -> PreparedJob:
     """
     Igual que prepare_video, pero el texto sale de uno o VARIOS VIDEOS DE YOUTUBE
@@ -361,6 +448,11 @@ def prepare_youtube(
     cta = cta or cfg.call_to_action
     image_source = (image_source or cfg.image_source or "hybrid").lower()
 
+    if podcast:
+        voice_a = _resolve_voice(voice_a or voice)
+        voice_b = _resolve_voice(voice_b or cfg.tts_voice)
+        voice = voice_a
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     job_dir = cfg.work_dir / f"job_{stamp}"
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -377,7 +469,11 @@ def prepare_youtube(
 
     # 2) Guion en escenas (mismo motor que el modo noticia)
     progress("Escribiendo el guion viral con IA...", 25)
-    script = generate_script(article, duration=duration, style=style, cta=cta, n_images=n_images)
+    script = generate_script(
+        article, duration=duration, style=style, cta=cta, n_images=n_images,
+        style_instructions=style_instructions,
+        podcast=podcast, speaker_a=speaker_a_name, speaker_b=speaker_b_name,
+    )
     print(f"[guion] {len(script.scenes)} escenas generadas (desde YouTube)")
 
     # 3) Voz
@@ -411,6 +507,13 @@ def prepare_youtube(
         voice=voice,
         rate=rate,
         synth_narration=script.narration,
+        podcast=podcast,
+        voice_a=voice_a,
+        voice_b=voice_b,
+        speaker_a_name=speaker_a_name,
+        speaker_b_name=speaker_b_name,
+        style_instructions=style_instructions,
+        persona_name=persona_name,
     )
 
 
@@ -428,6 +531,13 @@ def draft_story(
     image_source: str | None = None,
     media_type: str = "image",
     progress: ProgressFn = _noop,
+    style_instructions: str = "",
+    persona_name: str = "",
+    podcast: bool = False,
+    voice_a: str = "",
+    voice_b: str = "",
+    speaker_a_name: str = "",
+    speaker_b_name: str = "",
 ) -> PreparedJob:
     """
     Convierte la HISTORIA del usuario en un guion dividido en escenas con su
@@ -443,13 +553,20 @@ def draft_story(
     cta = cta or cfg.call_to_action
     image_source = (image_source or cfg.image_source or "hybrid").lower()
 
+    if podcast:
+        voice_a = _resolve_voice(voice_a or voice)
+        voice_b = _resolve_voice(voice_b or cfg.tts_voice)
+        voice = voice_a
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     job_dir = cfg.work_dir / f"job_{stamp}"
     job_dir.mkdir(parents=True, exist_ok=True)
 
     progress("Escribiendo el guion y los prompts con IA...", 40)
     script = generate_script_from_story(
-        story, duration=duration, n_images=n_images, cta=cta
+        story, duration=duration, n_images=n_images, cta=cta,
+        style_instructions=style_instructions,
+        podcast=podcast, speaker_a=speaker_a_name, speaker_b=speaker_b_name,
     )
     print(f"[historia] {len(script.scenes)} escenas/prompts generados")
 
@@ -477,6 +594,13 @@ def draft_story(
         voice=voice,
         rate=rate,
         synth_narration="",
+        podcast=podcast,
+        voice_a=voice_a,
+        voice_b=voice_b,
+        speaker_a_name=speaker_a_name,
+        speaker_b_name=speaker_b_name,
+        style_instructions=style_instructions,
+        persona_name=persona_name,
     )
 
 
@@ -637,7 +761,62 @@ def set_scene_image(prepared: PreparedJob, index: int, image_path: Path, source:
         path=Path(image_path), source=source, query="archivo subido", is_video=is_video
     )
     prepared.images[index] = result
+    # Si esta escena estaba marcada como "usar audio de mi video", refrescamos la
+    # duracion del nuevo video; si ya no es video, desactivamos esa marca.
+    scene = prepared.scenes[index]
+    if scene.use_own_audio:
+        if is_video:
+            scene.own_audio_duration = probe_duration(Path(image_path)) or 0.0
+        else:
+            scene.use_own_audio = False
+            scene.own_audio_duration = 0.0
     return result
+
+
+def set_scene_own_audio(
+    prepared: PreparedJob,
+    index: int,
+    use_own_audio: bool,
+    volume: float | None = None,
+) -> dict:
+    """
+    Marca (o desmarca) una escena para que use el AUDIO PROPIO del video subido
+    en vez de la voz del avatar (Opcion A: la escena dura lo que dura tu video).
+
+    Solo tiene sentido si la escena tiene un VIDEO como medio. Devuelve un dict
+    con el estado resultante (incluida la duracion del video en segundos).
+    """
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    scene = prepared.scenes[index]
+    img = prepared.images[index] if index < len(prepared.images) else None
+    is_video = bool(img and getattr(img, "is_video", False))
+
+    if use_own_audio and not is_video:
+        raise ValueError(
+            "Para usar el audio propio, esta escena debe tener un VIDEO. "
+            "Sube o elige un video en esta escena primero."
+        )
+
+    scene.use_own_audio = bool(use_own_audio)
+    if volume is not None:
+        try:
+            scene.own_audio_volume = max(0.0, min(2.0, float(volume)))
+        except (TypeError, ValueError):
+            pass
+
+    if scene.use_own_audio and img is not None:
+        dur = probe_duration(Path(img.path)) or 0.0
+        scene.own_audio_duration = round(dur, 2)
+    elif not scene.use_own_audio:
+        scene.own_audio_duration = 0.0
+
+    return {
+        "index": index,
+        "use_own_audio": scene.use_own_audio,
+        "own_audio_volume": scene.own_audio_volume,
+        "own_audio_duration": scene.own_audio_duration,
+    }
 
 
 # ==========================================================================
@@ -757,6 +936,87 @@ def add_scene(
 
 
 # ==========================================================================
+#  Construir la pista de AUDIO por ESCENA (podcast y/o video con audio propio)
+# ==========================================================================
+def _needs_per_scene_audio(prepared: PreparedJob) -> bool:
+    """
+    Decide si hay que armar el audio ESCENA POR ESCENA en vez de una sola pista.
+    Es necesario cuando:
+      - Es modo PODCAST (cada escena puede tener voz distinta), o
+      - Alguna escena usa el AUDIO PROPIO de su video (Opcion A).
+    """
+    if prepared.podcast:
+        return True
+    return any(getattr(s, "use_own_audio", False) for s in prepared.scenes)
+
+
+def _build_scene_audio_timeline(
+    prepared: PreparedJob,
+    progress: ProgressFn = _noop,
+) -> tuple[Path, list[WordTiming], list[float]]:
+    """
+    Genera un SEGMENTO de audio por cada escena y los une en una sola pista:
+      - Escena normal (avatar): se sintetiza su texto con su voz (la de podcast
+        A/B o la voz unica). Sus tiempos de palabra se DESPLAZAN por el tiempo
+        acumulado, para que los subtitulos queden sincronizados.
+      - Escena con audio propio (video): se extrae el audio del video subido, a
+        su volumen elegido, y la escena dura lo que dura el video. Esa escena NO
+        lleva subtitulos de voz (porque habla el video, no el avatar).
+
+    Devuelve: (ruta_audio_final, palabras_con_tiempos, duracion_por_escena).
+    """
+    job_dir = prepared.job_dir
+    seg_dir = job_dir / "audio_segments"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+
+    segments: list[Path] = []
+    combined_words: list[WordTiming] = []
+    per_scene_durations: list[float] = []
+    cursor = 0.0
+    total = len(prepared.scenes)
+
+    for i, scene in enumerate(prepared.scenes):
+        progress(f"Preparando audio de la escena {i + 1} de {total}...", 15 + int(20 * (i / max(1, total))))
+        img = prepared.images[i] if i < len(prepared.images) else None
+        is_video = bool(img and getattr(img, "is_video", False))
+        seg_wav = seg_dir / f"seg_{i:02d}.wav"
+
+        # --- Escena con AUDIO PROPIO del video (Opcion A) ---
+        if scene.use_own_audio and is_video:
+            dur = probe_duration(Path(img.path)) or scene.own_audio_duration or 3.0
+            if has_audio_stream(Path(img.path)):
+                extract_audio(Path(img.path), seg_wav, volume=scene.own_audio_volume, duration=dur)
+            else:
+                # El video no trae sonido: ponemos silencio para respetar su duracion.
+                make_silence(dur, seg_wav)
+            scene.own_audio_duration = round(dur, 2)
+            segments.append(seg_wav)
+            per_scene_durations.append(dur)
+            cursor += dur
+            continue
+
+        # --- Escena normal: voz del avatar (TTS) ---
+        voice = voice_for_scene(prepared, scene)
+        mp3 = seg_dir / f"seg_{i:02d}.mp3"
+        audio = synthesize_voice(scene.text, voice=voice, rate=prepared.rate, out_path=mp3)
+        # Normalizamos a WAV estandar para poder concatenar con los demas.
+        normalize_audio(audio.audio_path, seg_wav)
+        dur = probe_duration(seg_wav) or audio.duration or 1.0
+        # Desplazamos los tiempos de cada palabra por el tiempo acumulado.
+        for w in audio.words:
+            combined_words.append(
+                WordTiming(word=w.word, start=round(w.start + cursor, 3), end=round(w.end + cursor, 3))
+            )
+        segments.append(seg_wav)
+        per_scene_durations.append(dur)
+        cursor += dur
+
+    progress("Uniendo el audio de todas las escenas...", 36)
+    final_audio = concat_audio(segments, job_dir / "voz.mp3")
+    return final_audio, combined_words, per_scene_durations
+
+
+# ==========================================================================
 #  PASO 2: ensamblar el video final con las imagenes ya aprobadas
 # ==========================================================================
 def assemble_prepared(
@@ -782,29 +1042,51 @@ def assemble_prepared(
     desired_voice = _resolve_voice(voice) if voice else None
     voice_changed = desired_voice is not None and desired_voice != prepared.voice
 
-    # Si el usuario edito dialogos o elimino escenas, la narracion cambio:
-    # regeneramos la VOZ para que el audio y los subtitulos queden sincronizados.
-    current = prepared.current_narration()
-    narration_changed = bool(current) and current != prepared.synth_narration
+    # Duraciones por escena; si el flujo por escena las define, las usamos.
+    per_scene_img_durations: list[float] | None = None
 
-    if voice_changed or narration_changed or prepared.audio_path is None:
-        if voice_changed:
+    if _needs_per_scene_audio(prepared):
+        # --- FLUJO POR ESCENA (podcast y/o video con audio propio) ---
+        # Aqui cada escena tiene su propio segmento de audio (voz A/B, o el audio
+        # del video subido) y los unimos en una sola pista, con los subtitulos
+        # sincronizados por escena.
+        if voice_changed and not prepared.podcast:
             prepared.voice = desired_voice  # type: ignore[assignment]
             print(f"[voz] el usuario cambio la voz -> {prepared.voice}")
-        # Texto a narrar: el actual si cambio; si no, el mismo de antes.
-        text_for_voice = current if narration_changed else (prepared.synth_narration or current)
-        if not text_for_voice:
-            text_for_voice = prepared.narration
-        progress("Regenerando la voz...", 15)
-        print("[voz] generando audio y tiempos")
-        audio = synthesize_voice(
-            text_for_voice, voice=prepared.voice, rate=prepared.rate, out_path=job_dir / "voz.mp3"
+        print("[audio] armando pista ESCENA POR ESCENA (podcast/audio propio)")
+        final_audio, combined_words, per_scene_img_durations = _build_scene_audio_timeline(
+            prepared, progress=progress
         )
-        prepared.audio_path = audio.audio_path
-        prepared.audio_words = audio.words
-        prepared.real_duration = probe_duration(audio.audio_path) or audio.duration or prepared.real_duration
-        prepared.narration = text_for_voice
-        prepared.synth_narration = text_for_voice
+        prepared.audio_path = final_audio
+        prepared.audio_words = combined_words
+        prepared.real_duration = probe_duration(final_audio) or sum(per_scene_img_durations) or prepared.real_duration
+        prepared.narration = prepared.current_narration()
+        prepared.synth_narration = prepared.narration
+    else:
+        # --- FLUJO NORMAL (una sola pista de voz continua) ---
+        # Si el usuario edito dialogos o elimino escenas, la narracion cambio:
+        # regeneramos la VOZ para que el audio y los subtitulos queden sincronizados.
+        current = prepared.current_narration()
+        narration_changed = bool(current) and current != prepared.synth_narration
+
+        if voice_changed or narration_changed or prepared.audio_path is None:
+            if voice_changed:
+                prepared.voice = desired_voice  # type: ignore[assignment]
+                print(f"[voz] el usuario cambio la voz -> {prepared.voice}")
+            # Texto a narrar: el actual si cambio; si no, el mismo de antes.
+            text_for_voice = current if narration_changed else (prepared.synth_narration or current)
+            if not text_for_voice:
+                text_for_voice = prepared.narration
+            progress("Regenerando la voz...", 15)
+            print("[voz] generando audio y tiempos")
+            audio = synthesize_voice(
+                text_for_voice, voice=prepared.voice, rate=prepared.rate, out_path=job_dir / "voz.mp3"
+            )
+            prepared.audio_path = audio.audio_path
+            prepared.audio_words = audio.words
+            prepared.real_duration = probe_duration(audio.audio_path) or audio.duration or prepared.real_duration
+            prepared.narration = text_for_voice
+            prepared.synth_narration = text_for_voice
 
     # Subtitulos
     progress("Creando los subtitulos sincronizados...", 30)
@@ -835,9 +1117,14 @@ def assemble_prepared(
         )
 
     # Duraciones sincronizadas por escena
-    img_durations = _scene_durations(prepared.scenes, prepared.real_duration)
-    if len(img_durations) != len(prepared.images):
-        img_durations = [prepared.real_duration / max(1, len(prepared.images))] * len(prepared.images)
+    if per_scene_img_durations is not None and len(per_scene_img_durations) == len(prepared.images):
+        # El flujo por escena ya calculo la duracion EXACTA de cada escena
+        # (incluidas las de video con audio propio).
+        img_durations = per_scene_img_durations
+    else:
+        img_durations = _scene_durations(prepared.scenes, prepared.real_duration)
+        if len(img_durations) != len(prepared.images):
+            img_durations = [prepared.real_duration / max(1, len(prepared.images))] * len(prepared.images)
 
     # Musica de fondo segun el modo elegido:
     #   "off"  -> sin musica

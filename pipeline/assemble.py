@@ -97,6 +97,113 @@ def probe_duration(media_path: Path) -> float | None:
         return None
 
 
+def has_audio_stream(media_path: Path) -> bool:
+    """True si el archivo (video) TRAE una pista de audio."""
+    ffprobe = find_ffprobe()
+    if not ffprobe:
+        # Sin ffprobe no podemos saberlo con certeza; asumimos que si (mejor
+        # intentar extraer y caer a silencio si falla).
+        return True
+    try:
+        out = subprocess.check_output(
+            [
+                ffprobe, "-v", "quiet", "-select_streams", "a",
+                "-show_entries", "stream=index", "-of", "json", str(media_path),
+            ],
+            text=True,
+        )
+        return bool(json.loads(out).get("streams"))
+    except Exception:
+        return False
+
+
+def extract_audio(
+    video_path: Path,
+    out_wav: Path,
+    volume: float = 1.0,
+    duration: float | None = None,
+) -> Path:
+    """
+    Extrae el audio PROPIO de un video (ej. el vendedor de tacos hablando) a un
+    WAV estandar (44100 Hz, estereo), aplicando el volumen indicado.
+
+    Se usa para las escenas marcadas como "usar el audio de mi video".
+    """
+    ffmpeg = find_ffmpeg()
+    out_wav = Path(out_wav)
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    vol = max(0.0, min(4.0, float(volume)))
+    cmd = [ffmpeg, "-y", "-i", str(Path(video_path).resolve())]
+    if duration and duration > 0:
+        cmd += ["-t", f"{duration:.3f}"]
+    cmd += [
+        "-vn",
+        "-af", f"volume={vol:.3f},aformat=sample_rates=44100:channel_layouts=stereo",
+        "-ar", "44100", "-ac", "2",
+        str(out_wav.resolve()),
+    ]
+    _run(cmd)
+    return out_wav
+
+
+def make_silence(duration: float, out_wav: Path) -> Path:
+    """Crea un WAV de SILENCIO de la duracion indicada (44100 Hz, estereo)."""
+    ffmpeg = find_ffmpeg()
+    out_wav = Path(out_wav)
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    dur = max(0.1, float(duration))
+    cmd = [
+        ffmpeg, "-y", "-f", "lavfi",
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-t", f"{dur:.3f}",
+        str(out_wav.resolve()),
+    ]
+    _run(cmd)
+    return out_wav
+
+
+def normalize_audio(in_path: Path, out_wav: Path) -> Path:
+    """Reencoda cualquier audio a WAV estandar (44100 Hz, estereo) para poder
+    concatenar segmentos de distinta procedencia (voz TTS + audio de videos)."""
+    ffmpeg = find_ffmpeg()
+    out_wav = Path(out_wav)
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        ffmpeg, "-y", "-i", str(Path(in_path).resolve()),
+        "-af", "aformat=sample_rates=44100:channel_layouts=stereo",
+        "-ar", "44100", "-ac", "2",
+        str(out_wav.resolve()),
+    ]
+    _run(cmd)
+    return out_wav
+
+
+def concat_audio(segments: list[Path], out_path: Path) -> Path:
+    """
+    Une varios audios (ya normalizados a WAV estandar) en UNO solo, en orden.
+    Se usa para armar la pista final cuando hay voces distintas por escena
+    (podcast) o escenas con el audio propio de un video.
+    """
+    ffmpeg = find_ffmpeg()
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    segs = [Path(s) for s in segments if s and Path(s).exists()]
+    if not segs:
+        raise ValueError("No hay segmentos de audio para unir.")
+    if len(segs) == 1:
+        # Un solo segmento: lo copiamos tal cual.
+        shutil.copy(str(segs[0]), str(out_path))
+        return out_path
+    inputs: list[str] = []
+    for s in segs:
+        inputs += ["-i", str(s.resolve())]
+    filt = "".join(f"[{i}:a]" for i in range(len(segs)))
+    filt += f"concat=n={len(segs)}:v=0:a=1[out]"
+    cmd = [ffmpeg, "-y", *inputs, "-filter_complex", filt, "-map", "[out]", str(out_path.resolve())]
+    _run(cmd)
+    return out_path
+
+
 def _make_clip(
     ffmpeg: str,
     image: Path,

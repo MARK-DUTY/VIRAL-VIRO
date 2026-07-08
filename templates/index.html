@@ -229,6 +229,77 @@
         </label>
       </div>
 
+      <!-- ============ AVATAR / ESTILO / PODCAST ============ -->
+      <div class="avatar-box">
+        <h3 class="music-title">🧑‍🎤 Avatar y estilo de hablar</h3>
+
+        <label class="music-radio" style="margin-bottom:10px;">
+          <input type="checkbox" id="podcast-toggle">
+          <span><strong>🎙️ Modo podcast (2 personas conversando)</strong> · dos voces que platican y se contestan, tipo podcast.</span>
+        </label>
+
+        <!-- Narrador UNICO (cuando NO es podcast) -->
+        <div id="single-avatar-box">
+          <div class="row">
+            <label class="field">
+              <span>Avatar (voz + estilo guardado)</span>
+              <select id="avatar-select">
+                <option value="">— Ninguno (usar la voz de arriba) —</option>
+                {% for a in avatars %}
+                <option value="{{ a.id }}">{{ a.name }} · {{ a.accent }} · {{ a.gender }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="field" id="style-preset-field">
+              <span>Estilo de personalidad (si no eliges avatar)</span>
+              <select id="style-key">
+                {% for s in persona_styles %}
+                <option value="{{ s.value }}">{{ s.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <!-- PODCAST: dos avatares/voces -->
+        <div id="podcast-box" class="hidden">
+          <div class="row">
+            <label class="field">
+              <span>🅰️ Persona A</span>
+              <select id="avatar-a-select">
+                <option value="">— Elegir voz manual —</option>
+                {% for a in avatars %}
+                <option value="{{ a.id }}">{{ a.name }} · {{ a.accent }} · {{ a.gender }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="field">
+              <span>🅱️ Persona B</span>
+              <select id="avatar-b-select">
+                <option value="">— Elegir voz manual —</option>
+                {% for a in avatars %}
+                <option value="{{ a.id }}">{{ a.name }} · {{ a.accent }} · {{ a.gender }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+          <!-- Voces manuales para podcast (si no usa avatares guardados) -->
+          <div class="row" id="podcast-manual">
+            <label class="field">
+              <span>Voz de A (manual)</span>
+              <select id="voice-a" class="voice-picker"></select>
+            </label>
+            <label class="field">
+              <span>Voz de B (manual)</span>
+              <select id="voice-b" class="voice-picker"></select>
+            </label>
+          </div>
+          <p class="hint">Si eliges un avatar guardado en A o B, se usa su voz y su estilo. Si no, elige una voz manual.</p>
+        </div>
+
+        <button type="button" id="manage-avatars-btn" class="btn-mini">👥 Mis avatares (crear / editar)</button>
+      </div>
+
       <label class="field">
         <span>Llamada a la accion (final del video)</span>
         <input type="text" id="cta" value="{{ defaults.cta }}">
@@ -236,6 +307,50 @@
 
       <button id="generate-btn" class="btn-primary">🎬 Preparar video</button>
     </section>
+
+    <!-- ============ GESTOR DE AVATARES (modal) ============ -->
+    <div id="avatars-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-head">
+          <h2>👥 Mis avatares</h2>
+          <button type="button" id="close-avatars-btn" class="btn-mini">✖ Cerrar</button>
+        </div>
+        <p class="hint">Un avatar es un personaje con <strong>nombre</strong>, una <strong>voz/acento</strong> y una <strong>forma de hablar</strong>. La forma de hablar cambia cómo la IA escribe el guion (serio, chismoso, galán...). El acento lo pone la voz que elijas.</p>
+
+        <div id="avatars-list" class="avatars-list"></div>
+
+        <div class="avatar-editor">
+          <h3 class="music-title" id="avatar-editor-title">➕ Nuevo avatar</h3>
+          <input type="hidden" id="avatar-edit-id" value="">
+          <label class="field">
+            <span>Nombre del avatar</span>
+            <input type="text" id="avatar-name" placeholder="Ej: Mr. Dóriga, Doña Pelos, El Galán...">
+          </label>
+          <label class="field">
+            <span>Voz / acento (país)</span>
+            <select id="avatar-voice" class="voice-picker"></select>
+          </label>
+          <label class="field">
+            <span>Estilo de hablar</span>
+            <select id="avatar-style">
+              {% for s in persona_styles %}
+              <option value="{{ s.value }}">{{ s.label }}</option>
+              {% endfor %}
+              <option value="custom">✍️ Personalizado (yo lo escribo)</option>
+            </select>
+          </label>
+          <label class="field" id="avatar-custom-field" style="display:none;">
+            <span>Describe cómo habla (personalizado)</span>
+            <textarea id="avatar-custom" rows="3" placeholder="Ej: habla como un locutor de lucha libre, muy exagerado y gritón..."></textarea>
+          </label>
+          <div class="add-scene-actions">
+            <button type="button" id="save-avatar-btn" class="btn-primary">💾 Guardar avatar</button>
+            <button type="button" id="cancel-avatar-btn" class="btn-secondary">Limpiar</button>
+          </div>
+          <p class="scene-status" id="avatar-status"></p>
+        </div>
+      </div>
+    </div>
 
     <section class="card hidden" id="progress-card">
       <h2 id="progress-title">Preparando tu video...</h2>
@@ -369,6 +484,11 @@
     <p>ViroFeed AI Personal · Hecho con herramientas gratis · Fase 1</p>
   </footer>
 
+  <script>
+    // Voces disponibles para poblar los selectores (avatares y podcast).
+    window.VF_VOICES = {{ voice_options|tojson }};
+    window.VF_FOREIGN = {{ foreign_voices|tojson }};
+  </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
