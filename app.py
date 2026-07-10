@@ -68,8 +68,11 @@ from pipeline.runner import (
     _media_duration as media_duration,
     add_scene,
     add_scene_clip,
+    clip_media_duration,
+    move_scene_clip,
     remove_scene_clip,
     set_scene_clip_seconds,
+    set_scene_clip_trim,
     assemble_prepared,
     delete_scene,
     draft_story,
@@ -560,6 +563,9 @@ def _review_payload(job_id: str) -> dict:
                     "is_video": bool(c.get("is_video")),
                     "seconds": round(float(c.get("seconds", 0) or 0), 1),
                     "source": c.get("source", ""),
+                    "trim_start": round(float(c.get("trim_start", 0) or 0), 2),
+                    "trim_end": round(float(c.get("trim_end", 0) or 0), 2),
+                    "media_duration": round(clip_media_duration(c), 2),
                 }
                 for c in (getattr(scene, "clips", None) or [])
             ],
@@ -1363,6 +1369,45 @@ def api_scene_clip_seconds():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/scene_clip_trim", methods=["POST"])
+def api_scene_clip_trim():
+    """Recorta un pedazo de video de la escena (usar solo del segundo X al Y)."""
+    data = request.get_json(force=True) or {}
+    job = JOBS.get(data.get("job_id"))
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        index = int(data.get("index"))
+        clip_index = int(data.get("clip_index"))
+        start = float(data.get("start") or 0.0)
+        end = float(data.get("end") or 0.0)
+        set_scene_clip_trim(job["prepared"], index, clip_index, start, end)
+        job["review"] = _review_payload(data.get("job_id"))
+        return jsonify({"ok": True, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/scene_clip_move", methods=["POST"])
+def api_scene_clip_move():
+    """Reordena un pedazo dentro de la escena (moverlo a la izquierda/derecha)."""
+    data = request.get_json(force=True) or {}
+    job = JOBS.get(data.get("job_id"))
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        index = int(data.get("index"))
+        clip_index = int(data.get("clip_index"))
+        direction = (data.get("direction") or "right").strip()
+        move_scene_clip(job["prepared"], index, clip_index, direction)
+        job["review"] = _review_payload(data.get("job_id"))
+        return jsonify({"ok": True, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
 # --------------------------------------------------------------------------
 #  AVATARES personalizados (crear / listar / editar / borrar)
 # --------------------------------------------------------------------------
@@ -1421,7 +1466,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 23 (subtitulos podcast + recortar video + pedazos por escena)")
+    print("  VERSION DEL CODIGO: 24 (linea de tiempo por escena: ver y recortar cada pedazo)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)
