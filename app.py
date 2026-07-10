@@ -65,7 +65,11 @@ _self_repair()
 
 from pipeline.config import settings
 from pipeline.runner import (
+    _media_duration as media_duration,
     add_scene,
+    add_scene_clip,
+    remove_scene_clip,
+    set_scene_clip_seconds,
     assemble_prepared,
     delete_scene,
     draft_story,
@@ -76,6 +80,7 @@ from pipeline.runner import (
     regenerate_scene_image,
     set_scene_image,
     set_scene_own_audio,
+    set_scene_trim,
     update_scene_prompt,
     update_scene_text,
     voice_for_scene,
@@ -544,6 +549,20 @@ def _review_payload(job_id: str) -> dict:
             "own_audio_volume": round(float(getattr(scene, "own_audio_volume", 1.0)), 2),
             "own_audio_duration": round(float(getattr(scene, "own_audio_duration", 0.0)), 1),
             "can_own_audio": is_video,   # solo tiene sentido si la escena es video
+            # Recorte del video (dejar solo un trozo)
+            "trim_start": round(float(getattr(img, "trim_start", 0.0) or 0.0), 2),
+            "trim_end": round(float(getattr(img, "trim_end", 0.0) or 0.0), 2),
+            "media_duration": round(media_duration(img), 2) if is_video else 0.0,
+            # Pedazos (mini-clips) de la escena, si tiene varios.
+            "clips": [
+                {
+                    "file": c.get("file") or Path(c.get("path", "")).name,
+                    "is_video": bool(c.get("is_video")),
+                    "seconds": round(float(c.get("seconds", 0) or 0), 1),
+                    "source": c.get("source", ""),
+                }
+                for c in (getattr(scene, "clips", None) or [])
+            ],
             # Podcast: quien habla
             "speaker": speaker,
             "speaker_name": speaker_name,
@@ -1253,6 +1272,98 @@ def api_scene_audio():
 
 
 # --------------------------------------------------------------------------
+#  Recortar el video de una escena (dejar solo un trozo: del segundo X al Y)
+# --------------------------------------------------------------------------
+@app.route("/api/scene_trim", methods=["POST"])
+def api_scene_trim():
+    data = request.get_json(force=True) or {}
+    job = JOBS.get(data.get("job_id"))
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        index = int(data.get("index"))
+        start = float(data.get("start") or 0.0)
+        end = float(data.get("end") or 0.0)
+        result = set_scene_trim(job["prepared"], index, start, end)
+        job["review"] = _review_payload(data.get("job_id"))
+        return jsonify({**result, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
+#  Varios PEDAZOS (mini-clips) dentro de una escena
+# --------------------------------------------------------------------------
+@app.route("/api/scene_clip_add", methods=["POST"])
+def api_scene_clip_add():
+    """Sube un pedazo (imagen o video corto) y lo agrega a una escena."""
+    job_id = request.form.get("job_id")
+    job = JOBS.get(job_id)
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    if "file" not in request.files:
+        return jsonify({"error": "No se recibio ningun archivo."}), 400
+    try:
+        index = int(request.form.get("index"))
+        seconds = float(request.form.get("seconds") or 2.0)
+        prepared = job["prepared"]
+        file = request.files["file"]
+        ext = Path(secure_filename(file.filename or "clip.mp4")).suffix.lower() or ".mp4"
+        image_exts = (".jpg", ".jpeg", ".png", ".webp")
+        video_exts = (".mp4", ".mov", ".webm", ".m4v", ".gif")
+        if ext not in image_exts + video_exts:
+            return jsonify({"error": "Formato no valido. Usa JPG, PNG, WEBP, GIF o MP4, MOV, WEBM."}), 400
+        is_video = ext in video_exts
+        images_dir = prepared.job_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        n = len(getattr(prepared.scenes[index], "clips", []) or [])
+        dest = images_dir / f"clip_{index:02d}_{n:02d}_{uuid.uuid4().hex[:6]}{ext}"
+        file.save(str(dest))
+        add_scene_clip(prepared, index, dest, is_video=is_video, seconds=seconds, source="subida")
+        job["review"] = _review_payload(job_id)
+        return jsonify({"ok": True, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/scene_clip_remove", methods=["POST"])
+def api_scene_clip_remove():
+    data = request.get_json(force=True) or {}
+    job = JOBS.get(data.get("job_id"))
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        index = int(data.get("index"))
+        clip_index = int(data.get("clip_index"))
+        remove_scene_clip(job["prepared"], index, clip_index)
+        job["review"] = _review_payload(data.get("job_id"))
+        return jsonify({"ok": True, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/scene_clip_seconds", methods=["POST"])
+def api_scene_clip_seconds():
+    data = request.get_json(force=True) or {}
+    job = JOBS.get(data.get("job_id"))
+    if not job or not job.get("prepared"):
+        return jsonify({"error": "Trabajo no encontrado o expirado."}), 404
+    try:
+        index = int(data.get("index"))
+        clip_index = int(data.get("clip_index"))
+        seconds = float(data.get("seconds") or 2.0)
+        set_scene_clip_seconds(job["prepared"], index, clip_index, seconds)
+        job["review"] = _review_payload(data.get("job_id"))
+        return jsonify({"ok": True, "review": job["review"]})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 400
+
+
+# --------------------------------------------------------------------------
 #  AVATARES personalizados (crear / listar / editar / borrar)
 # --------------------------------------------------------------------------
 @app.route("/api/avatars", methods=["GET", "POST"])
@@ -1310,7 +1421,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 22 (avatares + podcast + audio por escena + play por escena)")
+    print("  VERSION DEL CODIGO: 23 (subtitulos podcast + recortar video + pedazos por escena)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)
