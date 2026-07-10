@@ -122,18 +122,23 @@ def extract_audio(
     out_wav: Path,
     volume: float = 1.0,
     duration: float | None = None,
+    start: float = 0.0,
 ) -> Path:
     """
     Extrae el audio PROPIO de un video (ej. el vendedor de tacos hablando) a un
     WAV estandar (44100 Hz, estereo), aplicando el volumen indicado.
 
     Se usa para las escenas marcadas como "usar el audio de mi video".
+    `start` y `duration` permiten extraer solo el trozo recortado del video.
     """
     ffmpeg = find_ffmpeg()
     out_wav = Path(out_wav)
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     vol = max(0.0, min(4.0, float(volume)))
-    cmd = [ffmpeg, "-y", "-i", str(Path(video_path).resolve())]
+    cmd = [ffmpeg, "-y"]
+    if start and start > 0:
+        cmd += ["-ss", f"{float(start):.3f}"]
+    cmd += ["-i", str(Path(video_path).resolve())]
     if duration and duration > 0:
         cmd += ["-t", f"{duration:.3f}"]
     cmd += [
@@ -171,6 +176,41 @@ def normalize_audio(in_path: Path, out_wav: Path) -> Path:
     cmd = [
         ffmpeg, "-y", "-i", str(Path(in_path).resolve()),
         "-af", "aformat=sample_rates=44100:channel_layouts=stereo",
+        "-ar", "44100", "-ac", "2",
+        str(out_wav.resolve()),
+    ]
+    _run(cmd)
+    return out_wav
+
+
+def trim_and_format_audio(
+    in_path: Path,
+    out_wav: Path,
+    start: float = 0.0,
+    end: float | None = None,
+) -> Path:
+    """
+    Recorta un audio al rango [start, end] (en segundos) y lo deja como WAV
+    estandar (44100 Hz, estereo) con los tiempos reiniciados a cero.
+
+    Se usa para QUITAR el silencio inicial de cada segmento de voz (TTS) en el
+    modo podcast/audio-por-escena: asi el habla empieza justo al inicio del
+    segmento y los subtitulos quedan SINCRONIZADOS (sin desfase acumulado).
+    """
+    ffmpeg = find_ffmpeg()
+    out_wav = Path(out_wav)
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    start = max(0.0, float(start))
+    filters = []
+    if end is not None and float(end) > start:
+        filters.append(f"atrim=start={start:.3f}:end={float(end):.3f}")
+    else:
+        filters.append(f"atrim=start={start:.3f}")
+    filters.append("asetpts=PTS-STARTPTS")
+    filters.append("aformat=sample_rates=44100:channel_layouts=stereo")
+    cmd = [
+        ffmpeg, "-y", "-i", str(Path(in_path).resolve()),
+        "-af", ",".join(filters),
         "-ar", "44100", "-ac", "2",
         str(out_wav.resolve()),
     ]
@@ -264,6 +304,36 @@ def _make_clip(
     _run(cmd)
 
 
+def trim_video(
+    src: Path,
+    out_path: Path,
+    start: float = 0.0,
+    end: float = 0.0,
+) -> Path:
+    """
+    Recorta un video dejando SOLO el trozo [start, end] (en segundos) y lo guarda.
+    Se usa cuando el usuario elige "quedarse solo con esta parte" del clip.
+    Si end<=start, recorta desde start hasta el final.
+    """
+    ffmpeg = find_ffmpeg()
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    start = max(0.0, float(start))
+    cmd = [ffmpeg, "-y", "-ss", f"{start:.3f}"]
+    if end and float(end) > start:
+        cmd += ["-to", f"{float(end):.3f}"]
+    cmd += [
+        "-i", str(Path(src).resolve()),
+        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        # -ss/-to antes del -i recortan por tiempo del contenedor; reencodamos
+        # para que el corte sea exacto en cualquier reproductor.
+        str(out_path.resolve()),
+    ]
+    _run(cmd)
+    return out_path
+
+
 def _make_clip_from_video(
     ffmpeg: str,
     video: Path,
@@ -314,6 +384,7 @@ def build_video(
     music_volume: float = 0.15,
     resolution: tuple[int, int] = (VIDEO_W, VIDEO_H),
     media_is_video: list[bool] | None = None,
+    media_trims: list[tuple[float, float]] | None = None,
 ) -> AssembleResult:
     """
     Ensambla el video final y lo guarda en out_path.
@@ -363,8 +434,20 @@ def build_video(
         clip = clips_dir / f"clip_{i:02d}.mp4"
         is_vid = bool(media_is_video[i]) if (media_is_video and i < len(media_is_video)) else False
         if is_vid:
+            src_video = Path(img)
+            # Si el usuario recorto este video (dejar solo un trozo), primero
+            # cortamos el clip original a ese rango y usamos ese pedazo.
+            if media_trims and i < len(media_trims) and media_trims[i]:
+                t_start, t_end = media_trims[i]
+                if (t_start and t_start > 0) or (t_end and t_end > 0):
+                    trimmed = clips_dir / f"src_trim_{i:02d}.mp4"
+                    try:
+                        src_video = trim_video(src_video, trimmed, t_start, t_end)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[recorte] no pude recortar el video {i}: {exc}")
+                        src_video = Path(img)
             _make_clip_from_video(
-                ffmpeg, Path(img), per_image_list[i], clip,
+                ffmpeg, src_video, per_image_list[i], clip,
                 video_w=video_w, video_h=video_h,
             )
         else:

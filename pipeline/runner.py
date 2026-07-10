@@ -34,6 +34,7 @@ from .assemble import (
     normalize_audio,
     probe_duration,
     resolution_for,
+    trim_and_format_audio,
 )
 from .config import settings
 from .images import ImageResult, fetch_scene_images, fetch_scene_videos, fetch_single_image, fetch_single_video
@@ -806,8 +807,7 @@ def set_scene_own_audio(
             pass
 
     if scene.use_own_audio and img is not None:
-        dur = probe_duration(Path(img.path)) or 0.0
-        scene.own_audio_duration = round(dur, 2)
+        scene.own_audio_duration = round(_effective_video_duration(img), 2)
     elif not scene.use_own_audio:
         scene.own_audio_duration = 0.0
 
@@ -817,6 +817,209 @@ def set_scene_own_audio(
         "own_audio_volume": scene.own_audio_volume,
         "own_audio_duration": scene.own_audio_duration,
     }
+
+
+# ==========================================================================
+#  Duracion de un video y RECORTE (dejar solo un trozo del clip)
+# ==========================================================================
+def _media_duration(img: ImageResult | None) -> float:
+    """Duracion (seg) del clip original. La cachea en img.duration para no
+    volver a medirla en cada revision."""
+    if img is None:
+        return 0.0
+    d = getattr(img, "duration", 0.0) or 0.0
+    if d > 0:
+        return d
+    if getattr(img, "is_video", False):
+        d = probe_duration(Path(img.path)) or 0.0
+        try:
+            img.duration = round(d, 2)
+        except Exception:  # noqa: BLE001
+            pass
+        return d
+    return 0.0
+
+
+def _effective_video_duration(img: ImageResult | None) -> float:
+    """
+    Cuanto dura el video DESPUES del recorte:
+      - si hay trim_end valido: trim_end - trim_start
+      - si solo hay trim_start: duracion_original - trim_start
+      - si no hay recorte: duracion_original
+    """
+    if img is None:
+        return 0.0
+    src = _media_duration(img)
+    ts = max(0.0, float(getattr(img, "trim_start", 0.0) or 0.0))
+    te = float(getattr(img, "trim_end", 0.0) or 0.0)
+    if te and te > ts:
+        return round(te - ts, 2)
+    if src > 0:
+        return round(max(0.5, src - ts), 2)
+    return 0.0
+
+
+def set_scene_trim(prepared: PreparedJob, index: int, start: float, end: float) -> dict:
+    """
+    Recorta el video de una escena para quedarse SOLO con el trozo [start, end]
+    (en segundos). Ej: un clip de 8s del que solo quieres del segundo 4 al 7.
+
+    end=0 (o <=start) significa "hasta el final". Solo aplica a escenas de video.
+    """
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    img = prepared.images[index] if index < len(prepared.images) else None
+    if not img or not getattr(img, "is_video", False):
+        raise ValueError("Solo se pueden recortar escenas que tienen un VIDEO.")
+
+    src = _media_duration(img)
+    try:
+        start = max(0.0, float(start))
+    except (TypeError, ValueError):
+        start = 0.0
+    try:
+        end = float(end or 0.0)
+    except (TypeError, ValueError):
+        end = 0.0
+
+    # Limitamos a la duracion real del clip (si la conocemos).
+    if src > 0:
+        start = min(start, max(0.0, src - 0.3))
+        if end and end > src:
+            end = src
+    if end and end <= start:
+        end = 0.0  # rango invalido -> hasta el final
+
+    img.trim_start = round(start, 2)
+    img.trim_end = round(end, 2)
+
+    # Si la escena usa el audio del video, su duracion ahora es la del recorte.
+    scene = prepared.scenes[index]
+    if scene.use_own_audio:
+        scene.own_audio_duration = round(_effective_video_duration(img), 2)
+
+    return {
+        "index": index,
+        "trim_start": img.trim_start,
+        "trim_end": img.trim_end,
+        "media_duration": round(src, 2),
+        "effective_duration": _effective_video_duration(img),
+    }
+
+
+# ==========================================================================
+#  VARIOS PEDAZOS en una escena (mini-clips que se muestran uno tras otro)
+# ==========================================================================
+def _clip_from_image(img: ImageResult) -> dict:
+    """Crea una 'pieza' a partir del fondo actual de la escena (para arrancar
+    la lista de pedazos con lo que ya habia)."""
+    return {
+        "path": str(img.path),
+        "file": Path(img.path).name,
+        "is_video": bool(getattr(img, "is_video", False)),
+        "seconds": 4.0,   # peso/duracion aprox. del fondo principal
+        "trim_start": float(getattr(img, "trim_start", 0.0) or 0.0),
+        "trim_end": float(getattr(img, "trim_end", 0.0) or 0.0),
+        "source": getattr(img, "source", "fondo"),
+    }
+
+
+def add_scene_clip(
+    prepared: PreparedJob,
+    index: int,
+    file_path: Path,
+    is_video: bool,
+    seconds: float = 2.0,
+    source: str = "subida",
+    position: int | None = None,
+) -> list:
+    """
+    Agrega un PEDAZO (mini-clip o imagen) a una escena. La primera vez, la lista
+    se inicia con el fondo actual como pieza 1, y luego se agrega el pedazo nuevo.
+    Asi puedes tener: [fondo 4s] + [meme 2s] + [foto 2s] dentro de una escena.
+    """
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    scene = prepared.scenes[index]
+    if not scene.clips:
+        img = prepared.images[index] if index < len(prepared.images) else None
+        scene.clips = [_clip_from_image(img)] if img is not None else []
+    new = {
+        "path": str(file_path),
+        "file": Path(file_path).name,
+        "is_video": bool(is_video),
+        "seconds": max(0.3, float(seconds or 2.0)),
+        "trim_start": 0.0,
+        "trim_end": 0.0,
+        "source": source,
+    }
+    if position is None or position < 0 or position > len(scene.clips):
+        scene.clips.append(new)
+    else:
+        scene.clips.insert(position, new)
+    return scene.clips
+
+
+def remove_scene_clip(prepared: PreparedJob, index: int, clip_index: int) -> list:
+    """Quita un pedazo de la escena. Si no queda ninguno, la escena vuelve a su
+    fondo unico normal (clips vacio)."""
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    scene = prepared.scenes[index]
+    if scene.clips and 0 <= clip_index < len(scene.clips):
+        scene.clips.pop(clip_index)
+    if not scene.clips:
+        scene.clips = []
+    return scene.clips
+
+
+def set_scene_clip_seconds(prepared: PreparedJob, index: int, clip_index: int, seconds: float) -> list:
+    """Cambia los segundos (aprox.) de un pedazo dentro de la escena."""
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    scene = prepared.scenes[index]
+    if scene.clips and 0 <= clip_index < len(scene.clips):
+        try:
+            scene.clips[clip_index]["seconds"] = max(0.3, float(seconds))
+        except (TypeError, ValueError):
+            pass
+    return scene.clips
+
+
+def _flatten_media(
+    prepared: PreparedJob, img_durations: list[float]
+) -> tuple[list[Path], list[float], list[bool], list[tuple[float, float]]]:
+    """
+    Convierte las escenas en una lista PLANA de piezas visuales para el
+    ensamblaje. Una escena SIN pedazos aporta 1 pieza (su fondo, con la duracion
+    de la escena). Una escena CON pedazos aporta N piezas cuyas duraciones se
+    reparten (proporcional a sus 'seconds') dentro de la duracion de la escena,
+    para que el total de la escena NO cambie y todo siga sincronizado con la voz.
+    """
+    paths: list[Path] = []
+    durs: list[float] = []
+    isvid: list[bool] = []
+    trims: list[tuple[float, float]] = []
+    for i, scene in enumerate(prepared.scenes):
+        D = img_durations[i] if i < len(img_durations) else 0.0
+        clips = getattr(scene, "clips", None)
+        if clips:
+            weights = [max(0.1, float(c.get("seconds", 0) or 0)) for c in clips]
+            tot = sum(weights) or 1.0
+            for c, w in zip(clips, weights):
+                paths.append(Path(c["path"]))
+                durs.append(D * w / tot)
+                isvid.append(bool(c.get("is_video")))
+                trims.append((float(c.get("trim_start", 0) or 0), float(c.get("trim_end", 0) or 0)))
+        else:
+            im = prepared.images[i] if i < len(prepared.images) else None
+            if im is None:
+                continue
+            paths.append(Path(im.path))
+            durs.append(D)
+            isvid.append(bool(getattr(im, "is_video", False)))
+            trims.append((float(getattr(im, "trim_start", 0) or 0), float(getattr(im, "trim_end", 0) or 0)))
+    return paths, durs, isvid, trims
 
 
 # ==========================================================================
@@ -983,9 +1186,13 @@ def _build_scene_audio_timeline(
 
         # --- Escena con AUDIO PROPIO del video (Opcion A) ---
         if scene.use_own_audio and is_video:
-            dur = probe_duration(Path(img.path)) or scene.own_audio_duration or 3.0
+            t_start = max(0.0, float(getattr(img, "trim_start", 0.0) or 0.0))
+            dur = _effective_video_duration(img) or scene.own_audio_duration or 3.0
             if has_audio_stream(Path(img.path)):
-                extract_audio(Path(img.path), seg_wav, volume=scene.own_audio_volume, duration=dur)
+                extract_audio(
+                    Path(img.path), seg_wav,
+                    volume=scene.own_audio_volume, duration=dur, start=t_start,
+                )
             else:
                 # El video no trae sonido: ponemos silencio para respetar su duracion.
                 make_silence(dur, seg_wav)
@@ -999,14 +1206,36 @@ def _build_scene_audio_timeline(
         voice = voice_for_scene(prepared, scene)
         mp3 = seg_dir / f"seg_{i:02d}.mp3"
         audio = synthesize_voice(scene.text, voice=voice, rate=prepared.rate, out_path=mp3)
-        # Normalizamos a WAV estandar para poder concatenar con los demas.
-        normalize_audio(audio.audio_path, seg_wav)
-        dur = probe_duration(seg_wav) or audio.duration or 1.0
-        # Desplazamos los tiempos de cada palabra por el tiempo acumulado.
-        for w in audio.words:
-            combined_words.append(
-                WordTiming(word=w.word, start=round(w.start + cursor, 3), end=round(w.end + cursor, 3))
-            )
+        words = audio.words
+
+        if words:
+            # IMPORTANTE (sincronia de subtitulos): Edge TTS suele dejar un
+            # pequeno SILENCIO al inicio de cada clip. Si no lo quitamos, en el
+            # modo podcast/audio-por-escena el habla queda desplazada respecto a
+            # los tiempos de palabra y los subtitulos se sienten "atrasados",
+            # peor mientras mas escenas hay. Solucion: RECORTAMOS el silencio
+            # inicial (dejando un respiro minimo) y el sobrante final, y
+            # desplazamos los tiempos de palabra para que el habla empiece justo
+            # al inicio del segmento. Asi cada escena queda perfectamente pegada
+            # a su subtitulo, sin desfase acumulado.
+            lead_in = 0.05  # respiro minimo antes de la primera palabra
+            tail = 0.15     # colita despues de la ultima palabra (no cortar)
+            offset = max(0.0, words[0].start - lead_in)
+            seg_end = words[-1].end + tail
+            trim_and_format_audio(audio.audio_path, seg_wav, start=offset, end=seg_end)
+            for w in words:
+                combined_words.append(
+                    WordTiming(
+                        word=w.word,
+                        start=round((w.start - offset) + cursor, 3),
+                        end=round((w.end - offset) + cursor, 3),
+                    )
+                )
+        else:
+            # Sin tiempos de palabra (raro): dejamos el audio tal cual.
+            normalize_audio(audio.audio_path, seg_wav)
+
+        dur = probe_duration(seg_wav) or (audio.duration if not words else 1.0) or 1.0
         segments.append(seg_wav)
         per_scene_durations.append(dur)
         cursor += dur
@@ -1153,9 +1382,11 @@ def assemble_prepared(
     out_path = cfg.output_dir / out_name
     # Marca, por escena, si su fondo es un videoclip (para que el ensamblaje
     # lo trate como video en vez de aplicarle el zoom de fotos).
-    media_is_video = [bool(getattr(im, "is_video", False)) for im in prepared.images]
+    # Aplanamos las escenas en piezas visuales. Una escena puede tener VARIOS
+    # pedazos (mini-clips) que se muestran uno tras otro dentro de su tiempo.
+    flat_paths, flat_durs, flat_isvid, flat_trims = _flatten_media(prepared, img_durations)
     result = build_video(
-        images=[im.path for im in prepared.images],
+        images=flat_paths,
         audio_path=prepared.audio_path,
         subtitles_path=subs,
         out_path=out_path,
@@ -1163,11 +1394,12 @@ def assemble_prepared(
         logo_path=logo if logo.exists() else None,
         avatar_video=avatar_video,
         target_duration=prepared.real_duration,
-        image_durations=img_durations,
+        image_durations=flat_durs,
         music_path=music_file,
         music_volume=music_volume,
         resolution=(video_w, video_h),
-        media_is_video=media_is_video,
+        media_is_video=flat_isvid,
+        media_trims=flat_trims,
     )
 
     progress("Listo!", 100)

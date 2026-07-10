@@ -372,6 +372,52 @@ function renderReview(review) {
         </div>
       </div>` : "";
 
+    // Bloque "recortar video" (solo si la escena es un video): dos barritas,
+    // inicio y fin, para quedarse solo con un trozo del clip.
+    const trimMax = (scene.media_duration && scene.media_duration > 0) ? scene.media_duration : 30;
+    const tStart = scene.trim_start || 0;
+    const tEnd = (scene.trim_end && scene.trim_end > 0) ? scene.trim_end : trimMax;
+    const trimBlock = isVid ? `
+      <div class="trim-box" id="trim-${scene.index}">
+        <div class="trim-head">✂️ Recortar video (deja solo el trozo que quieres)</div>
+        <label class="trim-row">
+          <span>Inicio: <strong id="trim-slbl-${scene.index}">${tStart.toFixed(1)}s</strong></span>
+          <input type="range" min="0" max="${trimMax}" step="0.1" value="${tStart}" id="trim-start-${scene.index}">
+        </label>
+        <label class="trim-row">
+          <span>Fin: <strong id="trim-elbl-${scene.index}">${tEnd.toFixed(1)}s</strong></span>
+          <input type="range" min="0" max="${trimMax}" step="0.1" value="${tEnd}" id="trim-end-${scene.index}">
+        </label>
+        <div class="trim-actions">
+          <button class="btn-mini" data-trimapply="${scene.index}">✂️ Aplicar recorte</button>
+          <button class="btn-mini" data-trimreset="${scene.index}">↺ Video completo</button>
+          <span class="trim-status" id="trim-status-${scene.index}"></span>
+        </div>
+      </div>` : "";
+
+    // Bloque "pedazos de la escena": lista de mini-clips que se muestran uno
+    // tras otro dentro de la misma escena (ej: video 4s + meme 2s + foto 2s).
+    const hasClips = scene.clips && scene.clips.length;
+    const clipsList = hasClips ? scene.clips.map((c, k) => `
+      <div class="clip-item">
+        <span>${c.is_video ? "🎞️" : "🖼️"} ${k + 1}. ${escapeHtml(c.file)}</span>
+        <label class="clip-secs">seg: <input type="number" min="0.3" step="0.5" value="${c.seconds}" id="clipsec-${scene.index}-${k}" class="clip-secinput"></label>
+        <button class="btn-mini btn-danger" data-clipdel="${scene.index}-${k}">🗑️</button>
+      </div>`).join("") : "";
+    const clipsBlock = `
+      <div class="clips-box">
+        <div class="clips-head">🎞️ Pedazos de esta escena (mete un meme, otro video o una foto)</div>
+        ${hasClips
+          ? `<div class="clips-list">${clipsList}</div>
+             <p class="clips-hint">Los segundos son aprox.: se reparten dentro del tiempo de la escena.</p>`
+          : `<p class="clips-hint">Ahorita esta escena muestra un solo fondo. Agrega pedazos para partirla (ej: 4s video + 2s meme + 2s foto).</p>`}
+        <div class="clips-actions">
+          <input type="file" accept="image/*,video/*" class="hidden" id="clipfile-${scene.index}">
+          <button class="btn-mini" data-clipadd="${scene.index}">➕ Agregar pedazo</button>
+          <span class="clip-status" id="clipstatus-${scene.index}"></span>
+        </div>
+      </div>`;
+
     // Todas las escenas tienen las MISMAS opciones, asi puedes cambiar
     // libremente cualquier escena entre foto y video.
     card.innerHTML = `
@@ -390,6 +436,8 @@ function renderReview(review) {
         <audio id="playaudio-${scene.index}" preload="none"></audio>
       </div>
       ${ownAudioBlock}
+      ${trimBlock}
+      ${clipsBlock}
       <span class="scene-saved hidden" id="saved-${scene.index}">✔ Guardado</span>
       <label class="scene-label">🔎 Descripción (en inglés) · para imagen IA o para buscar foto/video</label>
       <textarea class="scene-prompt" id="prompt-${scene.index}" rows="2" spellcheck="false"
@@ -441,6 +489,47 @@ function renderReview(review) {
       });
       vol.addEventListener("change", () => setSceneOwnAudioVolume(i, parseInt(vol.value, 10) / 100));
     }
+    // Controles de recorte de video (inicio / fin)
+    const ts = $(`trim-start-${i}`);
+    const te = $(`trim-end-${i}`);
+    if (ts && te) {
+      ts.addEventListener("input", () => {
+        const lbl = $(`trim-slbl-${i}`);
+        if (lbl) lbl.textContent = parseFloat(ts.value).toFixed(1) + "s";
+      });
+      te.addEventListener("input", () => {
+        const lbl = $(`trim-elbl-${i}`);
+        if (lbl) lbl.textContent = parseFloat(te.value).toFixed(1) + "s";
+      });
+    }
+    const applyBtn = document.querySelector(`[data-trimapply="${i}"]`);
+    if (applyBtn) applyBtn.addEventListener("click", () => {
+      const s = parseFloat($(`trim-start-${i}`).value) || 0;
+      const e = parseFloat($(`trim-end-${i}`).value) || 0;
+      setSceneTrim(i, s, e);
+    });
+    const resetBtn = document.querySelector(`[data-trimreset="${i}"]`);
+    if (resetBtn) resetBtn.addEventListener("click", () => {
+      const startEl = $(`trim-start-${i}`);
+      const endEl = $(`trim-end-${i}`);
+      if (startEl) startEl.value = 0;
+      if (endEl) endEl.value = endEl.max;
+      const sl = $(`trim-slbl-${i}`); if (sl) sl.textContent = "0.0s";
+      const el = $(`trim-elbl-${i}`); if (el) el.textContent = parseFloat(endEl.max).toFixed(1) + "s";
+      setSceneTrim(i, 0, 0);
+    });
+
+    // Controles de PEDAZOS (mini-clips) de la escena
+    const clipAddBtn = document.querySelector(`[data-clipadd="${i}"]`);
+    if (clipAddBtn) clipAddBtn.addEventListener("click", () => $(`clipfile-${i}`).click());
+    const clipFile = $(`clipfile-${i}`);
+    if (clipFile) clipFile.addEventListener("change", () => uploadSceneClip(i, clipFile.files[0], 2));
+    (scene.clips || []).forEach((c, k) => {
+      const del = document.querySelector(`[data-clipdel="${i}-${k}"]`);
+      if (del) del.addEventListener("click", () => removeSceneClip(i, k));
+      const sec = $(`clipsec-${i}-${k}`);
+      if (sec) sec.addEventListener("change", () => setSceneClipSeconds(i, k, parseFloat(sec.value) || 2));
+    });
   });
   // Guardar el dialogo automaticamente cuando el usuario termina de editar
   grid.querySelectorAll(".scene-dialogue").forEach((ta) => {
@@ -1029,6 +1118,77 @@ async function setSceneOwnAudioVolume(i, val) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ job_id: currentJob, index: i, use_own_audio: true, volume: val }),
+    });
+  } catch (e) { /* silencioso */ }
+}
+
+// Recortar el video de una escena (dejar solo del segundo X al Y)
+async function setSceneTrim(i, start, end) {
+  const status = $(`trim-status-${i}`);
+  if (status) status.textContent = "Guardando recorte...";
+  try {
+    const resp = await fetch("/api/scene_trim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, start, end }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { if (status) status.textContent = "❌ " + (data.error || "No se pudo"); return; }
+    const finTxt = data.trim_end > 0 ? `${data.trim_end}s` : "el final";
+    if (status) status.textContent = `✔ Usando del ${data.trim_start}s a ${finTxt} (${data.effective_duration}s)`;
+    // Si la escena usa su propio audio, su duración cambió: actualizamos el sello.
+    const durbadge = $(`dur-${i}`);
+    if (durbadge && data.effective_duration && $(`ownaudio-chk-${i}`) && $(`ownaudio-chk-${i}`).checked) {
+      durbadge.textContent = `⏱️ ~${data.effective_duration}s`;
+    }
+  } catch (e) {
+    if (status) status.textContent = "❌ Error de conexión";
+  }
+}
+
+// ----------------------------------------------------------------------
+//  Pedazos (mini-clips) dentro de una escena
+// ----------------------------------------------------------------------
+async function uploadSceneClip(i, file, seconds) {
+  if (!file) return;
+  const status = $(`clipstatus-${i}`);
+  if (status) status.textContent = "Subiendo pedazo...";
+  try {
+    const fd = new FormData();
+    fd.append("job_id", currentJob);
+    fd.append("index", i);
+    fd.append("seconds", seconds || 2);
+    fd.append("file", file);
+    const resp = await fetch("/api/scene_clip_add", { method: "POST", body: fd });
+    const data = await resp.json();
+    if (!resp.ok) { if (status) status.textContent = "❌ " + (data.error || "No se pudo"); return; }
+    renderReview(data.review);
+  } catch (e) {
+    if (status) status.textContent = "❌ Error de conexión";
+  }
+}
+
+async function removeSceneClip(i, k) {
+  try {
+    const resp = await fetch("/api/scene_clip_remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, clip_index: k }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert(data.error || "No se pudo quitar el pedazo"); return; }
+    renderReview(data.review);
+  } catch (e) {
+    alert("Error: " + e);
+  }
+}
+
+async function setSceneClipSeconds(i, k, seconds) {
+  try {
+    await fetch("/api/scene_clip_seconds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, clip_index: k, seconds }),
     });
   } catch (e) { /* silencioso */ }
 }

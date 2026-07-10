@@ -617,3 +617,41 @@ textarea:focus { border-color: var(--accent); }
   margin-top: 14px;
   padding-top: 14px;
 }
+
+
+/* ================= Recortar video (trim) ================= */
+.trim-box {
+  background: rgba(255, 92, 157, 0.08);
+  border: 1px dashed rgba(255, 92, 157, 0.4);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.trim-head { font-size: 0.85rem; font-weight: 700; margin-bottom: 8px; }
+.trim-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.trim-row span { font-size: 0.8rem; color: var(--muted); }
+.trim-row input[type="range"] { width: 100%; accent-color: var(--accent-2); }
+.trim-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trim-status { font-size: 0.78rem; color: var(--ok); }
+
+
+/* ================= Pedazos (mini-clips) por escena ================= */
+.clips-box {
+  background: rgba(52, 211, 153, 0.07);
+  border: 1px dashed rgba(52, 211, 153, 0.4);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.clips-head { font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; }
+.clips-hint { font-size: 0.78rem; color: var(--muted); margin: 4px 0 8px; }
+.clips-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.clip-item {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--card-2); padding: 6px 10px; border-radius: 8px; font-size: 0.8rem;
+}
+.clip-item > span:first-child { flex: 1; min-width: 120px; }
+.clip-secs { font-size: 0.78rem; color: var(--muted); }
+.clip-secinput { width: 64px; padding: 4px 6px; border-radius: 6px; }
+.clips-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.clip-status { font-size: 0.78rem; color: var(--ok); }

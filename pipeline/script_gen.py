@@ -302,6 +302,12 @@ class Scene:
     use_own_audio: bool = False
     own_audio_volume: float = 1.0   # volumen del audio del video (0.0 a 1.0)
     own_audio_duration: float = 0.0  # duracion (seg) del video subido (cacheada)
+    # --- VARIOS PEDAZOS en una escena: lista ORDENADA de piezas visuales que se
+    #     muestran una tras otra mientras corre el audio de la escena. Vacia =
+    #     una sola imagen/video de fondo (comportamiento normal). Cada pieza:
+    #     {"path": str, "file": str, "is_video": bool, "seconds": float,
+    #      "trim_start": float, "trim_end": float, "source": str}
+    clips: list = field(default_factory=list)
 
 
 @dataclass

@@ -108,6 +108,11 @@ class ImageResult:
     query: str        # con que descripcion/keyword se obtuvo
     url: str = ""     # URL original de la foto (para no repetirla al pulsar "Otra foto")
     is_video: bool = False   # True si 'path' es un videoclip .mp4 (en vez de una foto)
+    # --- RECORTE del video (solo si is_video): usar solo el trozo [trim_start, trim_end]
+    #     del clip original. trim_end=0 significa "hasta el final". ---
+    trim_start: float = 0.0
+    trim_end: float = 0.0
+    duration: float = 0.0    # duracion (seg) del clip original (0 = desconocida)
 
 
 def _download(url: str, dest: Path, timeout: int = 60) -> bool:
