@@ -986,6 +986,71 @@ def set_scene_clip_seconds(prepared: PreparedJob, index: int, clip_index: int, s
     return scene.clips
 
 
+def clip_media_duration(clip: dict) -> float:
+    """Duracion (seg) del archivo de un pedazo (video). La cachea en el propio
+    dict para no volver a medirla. Las imagenes devuelven 0."""
+    if not clip:
+        return 0.0
+    d = float(clip.get("duration", 0.0) or 0.0)
+    if d > 0:
+        return d
+    if clip.get("is_video") and clip.get("path"):
+        d = probe_duration(Path(clip["path"])) or 0.0
+        clip["duration"] = round(d, 2)
+        return d
+    return 0.0
+
+
+def set_scene_clip_trim(
+    prepared: PreparedJob, index: int, clip_index: int, start: float, end: float
+) -> list:
+    """
+    Recorta UN pedazo (video) de la escena para usar solo el trozo [start, end].
+    end=0 (o <=start) = hasta el final. Solo aplica a pedazos de video.
+    """
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    scene = prepared.scenes[index]
+    if not scene.clips or not (0 <= clip_index < len(scene.clips)):
+        raise ValueError("Pedazo no encontrado.")
+    clip = scene.clips[clip_index]
+    if not clip.get("is_video"):
+        raise ValueError("Solo se pueden recortar los pedazos de VIDEO.")
+    src = clip_media_duration(clip)
+    try:
+        start = max(0.0, float(start))
+    except (TypeError, ValueError):
+        start = 0.0
+    try:
+        end = float(end or 0.0)
+    except (TypeError, ValueError):
+        end = 0.0
+    if src > 0:
+        start = min(start, max(0.0, src - 0.3))
+        if end and end > src:
+            end = src
+    if end and end <= start:
+        end = 0.0
+    clip["trim_start"] = round(start, 2)
+    clip["trim_end"] = round(end, 2)
+    return scene.clips
+
+
+def move_scene_clip(prepared: PreparedJob, index: int, clip_index: int, direction: str) -> list:
+    """Mueve un pedazo a la izquierda ('up'/'left') o a la derecha ('down'/'right')
+    para reordenar el orden en que se muestran dentro de la escena."""
+    if index < 0 or index >= len(prepared.scenes):
+        raise ValueError("Escena fuera de rango.")
+    scene = prepared.scenes[index]
+    clips = scene.clips or []
+    if not (0 <= clip_index < len(clips)):
+        return clips
+    swap = clip_index - 1 if direction in ("up", "left", "izq", "-1") else clip_index + 1
+    if 0 <= swap < len(clips):
+        clips[clip_index], clips[swap] = clips[swap], clips[clip_index]
+    return clips
+
+
 def _flatten_media(
     prepared: PreparedJob, img_durations: list[float]
 ) -> tuple[list[Path], list[float], list[bool], list[tuple[float, float]]]:

@@ -395,28 +395,69 @@ function renderReview(review) {
         </div>
       </div>` : "";
 
-    // Bloque "pedazos de la escena": lista de mini-clips que se muestran uno
-    // tras otro dentro de la misma escena (ej: video 4s + meme 2s + foto 2s).
+    // Bloque "línea de tiempo de la escena": los pedazos que se muestran uno
+    // tras otro (ej: 4s video + 2s meme + 2s foto). Cada pedazo se ve/reproduce
+    // aquí mismo (los videos con su recorte), y se puede ajustar y reordenar.
     const hasClips = scene.clips && scene.clips.length;
-    const clipsList = hasClips ? scene.clips.map((c, k) => `
-      <div class="clip-item">
-        <span>${c.is_video ? "🎞️" : "🖼️"} ${k + 1}. ${escapeHtml(c.file)}</span>
-        <label class="clip-secs">seg: <input type="number" min="0.3" step="0.5" value="${c.seconds}" id="clipsec-${scene.index}-${k}" class="clip-secinput"></label>
-        <button class="btn-mini btn-danger" data-clipdel="${scene.index}-${k}">🗑️</button>
-      </div>`).join("") : "";
-    const clipsBlock = `
-      <div class="clips-box">
-        <div class="clips-head">🎞️ Pedazos de esta escena (mete un meme, otro video o una foto)</div>
-        ${hasClips
-          ? `<div class="clips-list">${clipsList}</div>
-             <p class="clips-hint">Los segundos son aprox.: se reparten dentro del tiempo de la escena.</p>`
-          : `<p class="clips-hint">Ahorita esta escena muestra un solo fondo. Agrega pedazos para partirla (ej: 4s video + 2s meme + 2s foto).</p>`}
-        <div class="clips-actions">
-          <input type="file" accept="image/*,video/*" class="hidden" id="clipfile-${scene.index}">
-          <button class="btn-mini" data-clipadd="${scene.index}">➕ Agregar pedazo</button>
-          <span class="clip-status" id="clipstatus-${scene.index}"></span>
-        </div>
-      </div>`;
+    const sceneDur = scene.duration ? scene.duration : "?";
+    let clipsBlock;
+    if (hasClips) {
+      const totalSecs = scene.clips.reduce((a, c) => a + (parseFloat(c.seconds) || 0), 0) || 1;
+      const bar = scene.clips.map((c) => {
+        const pct = (((parseFloat(c.seconds) || 0) / totalSecs) * 100).toFixed(1);
+        return `<div class="tl-seg" style="width:${pct}%">${c.is_video ? "🎞️" : "🖼️"} ${c.seconds}s</div>`;
+      }).join("");
+      const cards = scene.clips.map((c, k) => {
+        const prev = c.is_video
+          ? `<video class="clip-prev" data-tstart="${c.trim_start || 0}" data-tend="${c.trim_end || 0}" src="${imgUrl(c.file)}" muted playsinline loop autoplay></video>`
+          : `<img class="clip-prev" src="${imgUrl(c.file)}" alt="pedazo ${k + 1}">`;
+        const cmax = (c.media_duration && c.media_duration > 0) ? c.media_duration : 30;
+        const cts = c.trim_start || 0;
+        const cte = (c.trim_end && c.trim_end > 0) ? c.trim_end : cmax;
+        const trimC = c.is_video ? `
+          <div class="clip-trim">
+            <label>Del <strong id="ctlbl-s-${scene.index}-${k}">${cts.toFixed(1)}s</strong>
+              <input type="range" min="0" max="${cmax}" step="0.1" value="${cts}" id="cts-${scene.index}-${k}"></label>
+            <label>al <strong id="ctlbl-e-${scene.index}-${k}">${cte.toFixed(1)}s</strong>
+              <input type="range" min="0" max="${cmax}" step="0.1" value="${cte}" id="cte-${scene.index}-${k}"></label>
+            <button class="btn-mini" data-cliptrim="${scene.index}-${k}">✂️ Aplicar y ver recorte</button>
+          </div>` : "";
+        return `
+          <div class="clip-card">
+            <div class="clip-prev-wrap"><span class="clip-badge">${k + 1}</span>${prev}</div>
+            <label class="clip-secs">dura <input type="number" min="0.3" step="0.5" value="${c.seconds}" id="clipsec-${scene.index}-${k}" class="clip-secinput"> s</label>
+            ${trimC}
+            <div class="clip-card-actions">
+              <button class="btn-mini" data-clipleft="${scene.index}-${k}" title="Mover a la izquierda">◀</button>
+              <button class="btn-mini" data-clipright="${scene.index}-${k}" title="Mover a la derecha">▶</button>
+              <button class="btn-mini btn-danger" data-clipdel="${scene.index}-${k}">🗑️</button>
+            </div>
+          </div>`;
+      }).join("");
+      clipsBlock = `
+        <div class="clips-box">
+          <div class="clips-head">🎞️ Línea de tiempo de la escena · dura ~${sceneDur}s</div>
+          <div class="tl-bar">${bar}</div>
+          <div class="clip-cards">${cards}</div>
+          <p class="clips-hint">Los segundos son aprox.: se reparten dentro del tiempo de la escena. Cada video se ve <strong>recortado</strong> en su preview.</p>
+          <div class="clips-actions">
+            <input type="file" accept="image/*,video/*" class="hidden" id="clipfile-${scene.index}">
+            <button class="btn-mini" data-clipadd="${scene.index}">➕ Agregar pedazo</button>
+            <span class="clip-status" id="clipstatus-${scene.index}"></span>
+          </div>
+        </div>`;
+    } else {
+      clipsBlock = `
+        <div class="clips-box">
+          <div class="clips-head">🎞️ Partir esta escena en pedazos (opcional) · dura ~${sceneDur}s</div>
+          <p class="clips-hint">Ahorita esta escena muestra un solo fondo. Agrega pedazos para partirla: ej. 4s video + 2s meme + 2s foto. Cada uno lo verás y podrás recortarlo aquí mismo.</p>
+          <div class="clips-actions">
+            <input type="file" accept="image/*,video/*" class="hidden" id="clipfile-${scene.index}">
+            <button class="btn-mini" data-clipadd="${scene.index}">➕ Agregar pedazo</button>
+            <span class="clip-status" id="clipstatus-${scene.index}"></span>
+          </div>
+        </div>`;
+    }
 
     // Todas las escenas tienen las MISMAS opciones, asi puedes cambiar
     // libremente cualquier escena entre foto y video.
@@ -529,8 +570,31 @@ function renderReview(review) {
       if (del) del.addEventListener("click", () => removeSceneClip(i, k));
       const sec = $(`clipsec-${i}-${k}`);
       if (sec) sec.addEventListener("change", () => setSceneClipSeconds(i, k, parseFloat(sec.value) || 2));
+      // Reordenar el pedazo
+      const left = document.querySelector(`[data-clipleft="${i}-${k}"]`);
+      if (left) left.addEventListener("click", () => moveSceneClip(i, k, "left"));
+      const right = document.querySelector(`[data-clipright="${i}-${k}"]`);
+      if (right) right.addEventListener("click", () => moveSceneClip(i, k, "right"));
+      // Sliders de recorte del pedazo (solo video): actualizar etiquetas
+      const cts = $(`cts-${i}-${k}`);
+      const cte = $(`cte-${i}-${k}`);
+      if (cts) cts.addEventListener("input", () => {
+        const l = $(`ctlbl-s-${i}-${k}`); if (l) l.textContent = parseFloat(cts.value).toFixed(1) + "s";
+      });
+      if (cte) cte.addEventListener("input", () => {
+        const l = $(`ctlbl-e-${i}-${k}`); if (l) l.textContent = parseFloat(cte.value).toFixed(1) + "s";
+      });
+      const trimBtn = document.querySelector(`[data-cliptrim="${i}-${k}"]`);
+      if (trimBtn) trimBtn.addEventListener("click", () => {
+        const s = cts ? parseFloat(cts.value) || 0 : 0;
+        const e = cte ? parseFloat(cte.value) || 0 : 0;
+        setSceneClipTrim(i, k, s, e);
+      });
     });
   });
+
+  // Preparar el preview RECORTADO de cada video (que reproduzca solo su trozo).
+  grid.querySelectorAll("video.clip-prev").forEach((v) => setupTrimPreview(v));
   // Guardar el dialogo automaticamente cuando el usuario termina de editar
   grid.querySelectorAll(".scene-dialogue").forEach((ta) => {
     const i = parseInt(ta.id.split("-")[1], 10);
@@ -1191,6 +1255,63 @@ async function setSceneClipSeconds(i, k, seconds) {
       body: JSON.stringify({ job_id: currentJob, index: i, clip_index: k, seconds }),
     });
   } catch (e) { /* silencioso */ }
+}
+
+// Recortar un pedazo de video (usar solo del segundo X al Y) y volver a dibujar
+// para que el preview muestre ese trozo.
+async function setSceneClipTrim(i, k, start, end) {
+  try {
+    const resp = await fetch("/api/scene_clip_trim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, clip_index: k, start, end }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert(data.error || "No se pudo recortar el pedazo"); return; }
+    renderReview(data.review);
+  } catch (e) {
+    alert("Error: " + e);
+  }
+}
+
+// Reordenar un pedazo (izquierda / derecha)
+async function moveSceneClip(i, k, direction) {
+  try {
+    const resp = await fetch("/api/scene_clip_move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJob, index: i, clip_index: k, direction }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert(data.error || "No se pudo mover el pedazo"); return; }
+    renderReview(data.review);
+  } catch (e) {
+    alert("Error: " + e);
+  }
+}
+
+// Hace que un <video> de preview reproduzca SOLO su trozo recortado, en loop.
+// Asi ves EXACTAMENTE la parte del video que se usará (ej: del 2 al 4), aquí,
+// antes de generar.
+function setupTrimPreview(v) {
+  if (!v) return;
+  const start = parseFloat(v.dataset.tstart || "0") || 0;
+  let end = parseFloat(v.dataset.tend || "0") || 0;
+  const clampToStart = () => {
+    try { if (start > 0) v.currentTime = start; } catch (e) { /* aún sin metadata */ }
+  };
+  v.addEventListener("loadedmetadata", () => {
+    if (!end || end <= start) end = v.duration || 0;
+    clampToStart();
+    v.play().catch(() => {});
+  });
+  v.addEventListener("timeupdate", () => {
+    const stop = (end && end > start) ? end : (v.duration || 0);
+    if (stop && v.currentTime >= stop - 0.05) {
+      v.currentTime = start;
+      v.play().catch(() => {});
+    }
+  });
 }
 
 // ----------------------------------------------------------------------
