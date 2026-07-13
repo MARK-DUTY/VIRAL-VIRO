@@ -224,17 +224,21 @@ function pollStatus() {
         showError(job.error || "Error durante el proceso");
         return;
       }
-      if (job.phase === "draft" && job.status === "draft_ready") {
+      // OJO: solo avanzamos si ademas de "listo" YA llegaron los datos. Si el
+      // estado dice listo pero los datos aun no estan (una fraccion de segundo),
+      // seguimos esperando en vez de tronar. Asi se evita el error intermitente
+      // "Cannot read properties of null (reading 'warning')".
+      if (job.phase === "draft" && job.status === "draft_ready" && job.draft) {
         clearInterval(pollTimer);
         renderDraft(job.draft);
         return;
       }
-      if (job.phase === "review" && job.status === "ready") {
+      if (job.phase === "review" && job.status === "ready" && job.review) {
         clearInterval(pollTimer);
         renderReview(job.review);
         return;
       }
-      if (job.phase === "done" && job.status === "done") {
+      if (job.phase === "done" && job.status === "done" && job.result) {
         clearInterval(pollTimer);
         showResult(job.result);
         return;

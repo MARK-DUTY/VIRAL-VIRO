@@ -676,11 +676,15 @@ def _run_prepare(job_id: str, url, options: dict) -> None:
             **_persona_kwargs(options),
         )
         JOBS[job_id]["prepared"] = prepared
+        # Preparamos los datos de revision ANTES de marcar "listo", para que el
+        # navegador nunca reciba status="ready" con la revision aun vacia. Eso
+        # causaba el error intermitente "Cannot read properties of null
+        # (reading 'warning')" cuando el sondeo caia justo en ese instante.
+        JOBS[job_id]["review"] = _review_payload(job_id)
         JOBS[job_id]["phase"] = "review"
-        JOBS[job_id]["status"] = "ready"
         JOBS[job_id]["percent"] = 100
         JOBS[job_id]["message"] = "Listo para revisar"
-        JOBS[job_id]["review"] = _review_payload(job_id)
+        JOBS[job_id]["status"] = "ready"   # el estado, hasta el FINAL
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         JOBS[job_id]["status"] = "error"
@@ -750,11 +754,15 @@ def _run_prepare_youtube(job_id: str, url, options: dict) -> None:
             **_persona_kwargs(options),
         )
         JOBS[job_id]["prepared"] = prepared
+        # Preparamos los datos de revision ANTES de marcar "listo", para que el
+        # navegador nunca reciba status="ready" con la revision aun vacia. Eso
+        # causaba el error intermitente "Cannot read properties of null
+        # (reading 'warning')" cuando el sondeo caia justo en ese instante.
+        JOBS[job_id]["review"] = _review_payload(job_id)
         JOBS[job_id]["phase"] = "review"
-        JOBS[job_id]["status"] = "ready"
         JOBS[job_id]["percent"] = 100
         JOBS[job_id]["message"] = "Listo para revisar"
-        JOBS[job_id]["review"] = _review_payload(job_id)
+        JOBS[job_id]["status"] = "ready"   # el estado, hasta el FINAL
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         JOBS[job_id]["status"] = "error"
@@ -822,11 +830,11 @@ def _run_draft(job_id: str, story: str, options: dict) -> None:
             **_persona_kwargs(options),
         )
         JOBS[job_id]["prepared"] = prepared
+        JOBS[job_id]["draft"] = _draft_payload(job_id)   # datos ANTES del estado
         JOBS[job_id]["phase"] = "draft"
-        JOBS[job_id]["status"] = "draft_ready"
         JOBS[job_id]["percent"] = 100
         JOBS[job_id]["message"] = "Borrador listo para revisar"
-        JOBS[job_id]["draft"] = _draft_payload(job_id)
+        JOBS[job_id]["status"] = "draft_ready"
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         JOBS[job_id]["status"] = "error"
@@ -885,11 +893,11 @@ def _run_generate_from_draft(job_id: str) -> None:
 
     try:
         prepare_from_draft(job["prepared"], progress=progress)
+        job["review"] = _review_payload(job_id)   # datos ANTES de marcar "listo"
         job["phase"] = "review"
-        job["status"] = "ready"
         job["percent"] = 100
         job["message"] = "Listo para revisar"
-        job["review"] = _review_payload(job_id)
+        job["status"] = "ready"
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         job["status"] = "error"
@@ -1125,10 +1133,6 @@ def _run_assemble(job_id: str) -> None:
             aspect=options.get("aspect", "9:16"),
             progress=progress,
         )
-        job["status"] = "done"
-        job["phase"] = "done"
-        job["percent"] = 100
-        job["message"] = "Listo!"
         job["result"] = {
             "video_file": result.video_path.name,
             "title": result.title,
@@ -1138,6 +1142,10 @@ def _run_assemble(job_id: str) -> None:
             "duration": round(result.duration, 1),
             "used_avatar": result.used_avatar,
         }
+        job["phase"] = "done"
+        job["percent"] = 100
+        job["message"] = "Listo!"
+        job["status"] = "done"   # el estado, hasta el FINAL (con result ya listo)
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         job["status"] = "error"
@@ -1466,7 +1474,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 24 (linea de tiempo por escena: ver y recortar cada pedazo)")
+    print("  VERSION DEL CODIGO: 26 (subtitulos sincronizados: tiempos por palabra reales)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)
