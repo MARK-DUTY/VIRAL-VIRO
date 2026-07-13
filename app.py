@@ -1474,7 +1474,7 @@ def _open_browser():
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
-    print("  VERSION DEL CODIGO: 24 (linea de tiempo por escena: ver y recortar cada pedazo)")
+    print("  VERSION DEL CODIGO: 25 (arreglo del error intermitente de conexion)")
     print("  Abriendo en tu navegador: http://localhost:5000")
     print("  (Para cerrar el programa, cierra esta ventana)")
     print("=" * 60)
