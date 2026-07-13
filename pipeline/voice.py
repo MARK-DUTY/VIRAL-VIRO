@@ -37,24 +37,75 @@ def _ticks_to_seconds(ticks: int) -> float:
     return ticks / 10_000_000.0
 
 
-async def _synthesize(text: str, voice: str, rate: str, out_path: Path) -> list[WordTiming]:
-    communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)
+def _make_communicate(text: str, voice: str, rate: str):
+    """
+    Crea el objeto de Edge TTS pidiendo EXPLICITAMENTE los tiempos por PALABRA
+    ("WordBoundary"). Esto es CLAVE para los subtitulos: las versiones nuevas de
+    edge-tts (7.x) por defecto mandan solo "SentenceBoundary" (por frase), y si
+    no pedimos WordBoundary nos quedamos sin tiempos de palabra -> los subtitulos
+    caian al 'Plan B' (reparto parejo) y se iban ATRASANDO poco a poco.
+
+    Las versiones viejas (6.x) no aceptan el parametro 'boundary' pero ya mandan
+    WordBoundary por defecto, asi que si falla lo creamos sin ese parametro.
+    """
+    try:
+        return edge_tts.Communicate(text=text, voice=voice, rate=rate, boundary="WordBoundary")
+    except TypeError:
+        return edge_tts.Communicate(text=text, voice=voice, rate=rate)
+
+
+def _words_from_sentences(sentences: list[tuple[float, float, str]]) -> list[WordTiming]:
+    """
+    Respaldo: si SOLO recibimos tiempos por FRASE (no por palabra), repartimos
+    las palabras DENTRO del tiempo real de su frase (proporcional a su largo).
+    Queda mucho mejor sincronizado que repartir todo el texto parejo, y NO se
+    acumula el atraso, porque cada frase se ancla a su tiempo real del audio.
+    """
     words: list[WordTiming] = []
+    for s_start, s_end, text in sentences:
+        toks = (text or "").split()
+        if not toks:
+            continue
+        weights = [max(1, len(t)) for t in toks]
+        total = sum(weights)
+        span = max(0.05, s_end - s_start)
+        t = s_start
+        for tok, w in zip(toks, weights):
+            dur = span * w / total
+            words.append(WordTiming(word=tok, start=round(t, 3), end=round(t + dur, 3)))
+            t += dur
+    return words
+
+
+async def _synthesize(text: str, voice: str, rate: str, out_path: Path) -> list[WordTiming]:
+    communicate = _make_communicate(text, voice, rate)
+    words: list[WordTiming] = []
+    sentences: list[tuple[float, float, str]] = []
 
     with open(out_path, "wb") as f:
         async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
+            ctype = chunk.get("type")
+            if ctype == "audio":
                 f.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
+            elif ctype == "WordBoundary":
                 start = _ticks_to_seconds(chunk["offset"])
                 dur = _ticks_to_seconds(chunk["duration"])
                 words.append(
                     WordTiming(
-                        word=chunk["text"],
+                        word=chunk.get("text", ""),
                         start=round(start, 3),
                         end=round(start + dur, 3),
                     )
                 )
+            elif ctype == "SentenceBoundary":
+                start = _ticks_to_seconds(chunk["offset"])
+                dur = _ticks_to_seconds(chunk["duration"])
+                sentences.append((start, start + dur, chunk.get("text", "")))
+
+    # Si no hubo tiempos por palabra (version que solo manda por frase), los
+    # derivamos de las frases (mejor que el reparto parejo global).
+    if not words and sentences:
+        words = _words_from_sentences(sentences)
     return words
 
 
