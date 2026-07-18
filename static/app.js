@@ -492,6 +492,7 @@ function renderReview(review) {
         <button class="btn-mini" data-act="stock" data-i="${scene.index}">🖼️ Otra foto real</button>
         <button class="btn-mini" data-act="video" data-i="${scene.index}">🎞️ Otro video real</button>
         <button class="btn-mini" data-act="upload" data-i="${scene.index}">⬆️ Subir foto/video</button>
+        <button class="btn-mini" data-act="capture" data-i="${scene.index}">📸 Capturar región</button>
         <button class="btn-mini btn-danger" data-act="delete" data-i="${scene.index}">🗑️ Eliminar</button>
       </div>
       <div class="paste-zone" data-i="${scene.index}" tabindex="0" title="Haz clic aquí y pega (Ctrl+V) una imagen o video del portapapeles">
@@ -514,6 +515,8 @@ function renderReview(review) {
       btn.addEventListener("click", () => regenerate(i, "video"));
     } else if (act === "upload") {
       btn.addEventListener("click", () => $(`file-${i}`).click());
+    } else if (act === "capture") {
+      btn.addEventListener("click", () => launchScreenCapture(i));
     } else if (act === "delete") {
       btn.addEventListener("click", () => deleteScene(i));
     } else if (act === "play") {
@@ -801,6 +804,25 @@ async function regenerate(i, mode) {
   } catch (e) {
     alert("Error al regenerar: " + e);
     setSceneLoading(i, false);
+  }
+}
+
+// Lanzar herramienta de captura de pantalla
+async function launchScreenCapture(sceneIndex) {
+  try {
+    const resp = await fetch("/api/launch_screenshot_tool", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      alert(data.error || "No se pudo abrir la herramienta de captura");
+      return;
+    }
+    alert("✅ Herramienta de captura abierta.\n\n1. Arrastra el mouse para seleccionar la región\n2. Al soltar, verás un popup con opciones\n3. Selecciona 'Subir a VIRAL-VIRO'\n4. Luego pega en esta escena con Ctrl+V");
+    // La captura se pegará al clipboard y el usuario podrá usar Ctrl+V en la zona de paste
+  } catch (e) {
+    alert("Error al lanzar la captura: " + e);
   }
 }
 

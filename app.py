@@ -1471,6 +1471,37 @@ def _open_browser():
         pass
 
 
+# --------------------------------------------------------------------------
+#  Lanzar herramienta de captura de pantalla
+# --------------------------------------------------------------------------
+@app.route("/api/launch_screenshot_tool", methods=["POST"])
+def api_launch_screenshot_tool():
+    """Ejecuta la herramienta de captura de pantalla en background"""
+    try:
+        import subprocess
+        import sys
+        
+        script_path = Path(__file__).parent / "screen_capture_tool.py"
+        
+        if not script_path.exists():
+            return jsonify({"error": "Herramienta de captura no encontrada"}), 404
+        
+        # Ejecutar en background sin bloquear
+        if sys.platform == 'win32':
+            # CREATE_NO_WINDOW = 0x08000000
+            subprocess.Popen(
+                [sys.executable, str(script_path)],
+                creationflags=0x08000000  # No mostrar ventana de consola
+            )
+        else:
+            subprocess.Popen([sys.executable, str(script_path)])
+        
+        return jsonify({"ok": True, "message": "Herramienta de captura abierta. Usa Ctrl+Z para cancelar."})
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify({"error": str(exc)}), 500
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("  ViroFeed AI Personal")
