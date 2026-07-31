@@ -54,6 +54,35 @@ def _make_communicate(text: str, voice: str, rate: str):
         return edge_tts.Communicate(text=text, voice=voice, rate=rate)
 
 
+def _norm_word(s: str) -> str:
+    """Version comparable de una palabra: minusculas y solo letras/numeros."""
+    return re.sub(r"[^0-9a-záéíóúüñ]", "", (s or "").lower())
+
+
+def _reattach_punctuation(text: str, words: list[WordTiming]) -> list[WordTiming]:
+    """
+    El motor de voz (Edge TTS) nos da cada palabra SIN signos de puntuacion, por
+    eso los subtitulos salian sin puntos, ni ¿? ni ¡!. Aqui volvemos a pegarle a
+    cada palabra los signos que tenia en el guion ORIGINAL (puntos, exclamacion,
+    interrogacion, acentos), conservando su tiempo. Las comas ya no vienen en el
+    texto (se quitaron antes), asi que los subtitulos quedan con todo MENOS comas.
+
+    Es a prueba de fallos: si el numero de palabras no coincide o la alineacion
+    se ve dudosa, dejamos las palabras tal cual (no arriesgamos romper nada).
+    """
+    tokens = (text or "").split()
+    if not words or len(tokens) != len(words):
+        return words
+    # Verificamos que de verdad esten alineadas (mismas palabras en el mismo orden).
+    matches = sum(1 for tk, w in zip(tokens, words) if _norm_word(tk) == _norm_word(w.word))
+    if matches < max(1, int(0.6 * len(words))):
+        return words
+    return [
+        WordTiming(word=tk, start=w.start, end=w.end)
+        for tk, w in zip(tokens, words)
+    ]
+
+
 def _words_from_sentences(sentences: list[tuple[float, float, str]]) -> list[WordTiming]:
     """
     Respaldo: si SOLO recibimos tiempos por FRASE (no por palabra), repartimos
@@ -128,6 +157,9 @@ def synthesize_voice(
         raise ValueError("No hay texto para convertir en voz.")
 
     words = asyncio.run(_synthesize(text, voice, rate, out_path))
+    # Devolvemos a cada palabra sus signos (puntos, ¿? ¡!, acentos) para que los
+    # subtitulos los muestren. Sin comas, porque el texto ya viene sin comas.
+    words = _reattach_punctuation(text, words)
 
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise ValueError(
