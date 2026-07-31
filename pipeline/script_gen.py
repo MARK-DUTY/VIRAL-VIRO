@@ -409,6 +409,9 @@ REQUISITOS:
 - La PRIMERA escena debe ser un GANCHO que enganche en los primeros 3 segundos.
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
+- En "text" NO uses COMAS (,). En lugar de comas, usa puntos para separar las
+  ideas, y aprovecha los signos de exclamacion (¡!) e interrogacion (¿?) para el
+  ritmo y la entonacion. SI debes conservar los acentos y la ortografia correcta.
 {_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
@@ -490,6 +493,9 @@ REQUISITOS:
 - La PRIMERA escena debe ser un GANCHO que enganche en los primeros 3 segundos.
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
+- En "text" NO uses COMAS (,). En lugar de comas, usa puntos para separar las
+  ideas, y aprovecha los signos de exclamacion (¡!) e interrogacion (¿?) para el
+  ritmo y la entonacion. SI debes conservar los acentos y la ortografia correcta.
 {_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
@@ -689,6 +695,34 @@ def _call_groq(messages: list[dict], timeout: int = 60, max_tokens: int = 2500) 
         return _extract_json(content)
     except Exception as exc:
         raise ValueError(f"La IA no devolvio un JSON valido. Detalle: {exc}") from exc
+
+
+def _remove_commas(text: str) -> str:
+    """
+    Quita TODAS las comas del texto narrado, PERO conserva el resto de signos
+    (puntos, signos de exclamacion ¡! e interrogacion ¿?, acentos, etc.).
+
+    Se hace por peticion del usuario: los dialogos NO deben llevar comas. Como
+    en espanol la coma casi siempre va seguida de un espacio, al quitar solo el
+    caracter de la coma el texto queda bien separado; ademas normalizamos los
+    espacios dobles y los espacios que hubieran quedado antes de un punto.
+    """
+    if not text:
+        return text
+    # Quita la coma normal "," y la coma de ancho completo "，".
+    text = text.replace(",", " ").replace("\uff0c", " ")
+    # Junta espacios repetidos.
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    # Quita el espacio que pudiera quedar ANTES de un signo de puntuacion.
+    text = re.sub(r"\s+([.!?;:])", r"\1", text)
+    return text.strip()
+
+
+def _strip_commas_from_script(script: "VideoScript") -> None:
+    """Elimina las comas de TODAS las escenas y rearma la narracion sin comas."""
+    for sc in script.scenes:
+        sc.text = _remove_commas(sc.text)
+    script.narration = " ".join(s.text for s in script.scenes if s.text.strip()).strip()
 
 
 def _parse_script(parsed: dict) -> VideoScript:
@@ -955,6 +989,9 @@ def generate_script(
         exact_scene_count=exact,
         podcast=podcast,
     )
+    # Quitar TODAS las comas del guion (peticion del usuario): el texto conserva
+    # puntos, signos de exclamacion/interrogacion y acentos, pero sin comas.
+    _strip_commas_from_script(script)
     print(
         f"[guion] {len(script.scenes)} escenas, ~{_count_words(script.scenes)} palabras "
         f"(objetivo {target_words} para {duration}s)"
@@ -1024,6 +1061,9 @@ def generate_script_from_story(
         exact_scene_count=exact,
         podcast=podcast,
     )
+    # Quitar TODAS las comas del guion (peticion del usuario): el texto conserva
+    # puntos, signos de exclamacion/interrogacion y acentos, pero sin comas.
+    _strip_commas_from_script(script)
     print(
         f"[historia] {len(script.scenes)} escenas, ~{_count_words(script.scenes)} palabras "
         f"(objetivo {target_words} para {duration}s)"
