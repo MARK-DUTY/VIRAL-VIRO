@@ -36,6 +36,7 @@ _RAW_BASE = "https://raw.githubusercontent.com/MARK-DUTY/VIROFEED-PERSONAL/main"
 _REQUIRED_FILES = {
     "pipeline/music.py": None,
     "pipeline/youtube.py": "def extract_youtubes",
+    "pipeline/tiktok.py": "def extract_tiktoks",
 }
 
 
@@ -78,6 +79,7 @@ from pipeline.runner import (
     draft_story,
     planned_scene_durations,
     prepare_from_draft,
+    prepare_tiktok,
     prepare_video,
     prepare_youtube,
     regenerate_scene_image,
@@ -763,6 +765,80 @@ def _run_prepare_youtube(job_id: str, url, options: dict) -> None:
         JOBS[job_id]["percent"] = 100
         JOBS[job_id]["message"] = "Listo para revisar"
         JOBS[job_id]["status"] = "ready"   # el estado, hasta el FINAL
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        JOBS[job_id]["status"] = "error"
+        JOBS[job_id]["error"] = str(exc)
+
+
+# --------------------------------------------------------------------------
+#  PASO 1 (TIKTOK): preparar desde un link de video de TikTok
+# --------------------------------------------------------------------------
+@app.route("/api/prepare_tiktok", methods=["POST"])
+def api_prepare_tiktok():
+    data = request.get_json(force=True) or {}
+    urls = _parse_urls(data)
+    if not urls:
+        return jsonify({"error": "Pega el enlace de un video de TikTok primero."}), 400
+
+    fresh = settings.reload()
+    missing = fresh.missing_keys()
+    if "GROQ_API_KEY" in missing:
+        return jsonify({"error": "Faltan claves en tu archivo .env: " + ", ".join(missing)}), 400
+
+    job_id = uuid.uuid4().hex[:12]
+    options = {
+        "duration": int(data.get("duration") or fresh.video_duration),
+        "style": data.get("style") or fresh.script_style,
+        "n_images": data.get("n_images") or "auto",
+        "voice": data.get("voice") or fresh.tts_voice,
+        "rate": data.get("rate") if data.get("rate") is not None else fresh.tts_rate,
+        "cta": data.get("cta") or fresh.call_to_action,
+        "image_source": data.get("image_source") or fresh.image_source,
+        "media_type": (data.get("media_type") or "image").lower(),
+        "subtitle_color": data.get("subtitle_color") or "amarillo",
+        "subtitle_position": data.get("subtitle_position") or "center",
+        "use_avatar": bool(data.get("use_avatar", fresh.avatar_enabled)),
+        "music_mode": data.get("music_mode") or "auto",
+        "music_volume": float(data.get("music_volume") or 0.15),
+        "aspect": data.get("aspect") or "9:16",
+    }
+    _merge_persona_into_options(options, data)
+    JOBS[job_id] = {
+        "status": "running", "phase": "preparing", "message": "Iniciando...",
+        "percent": 0, "error": None, "prepared": None, "options": options,
+        "review": None, "result": None,
+    }
+
+    threading.Thread(target=_run_prepare_tiktok, args=(job_id, urls, options), daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+def _run_prepare_tiktok(job_id: str, url, options: dict) -> None:
+    def progress(msg: str, pct: int) -> None:
+        JOBS[job_id]["message"] = msg
+        JOBS[job_id]["percent"] = pct
+
+    try:
+        prepared = prepare_tiktok(
+            url,
+            duration=options["duration"],
+            style=options["style"],
+            n_images=options.get("n_images", "auto"),
+            voice=options["voice"],
+            rate=options["rate"],
+            cta=options["cta"],
+            image_source=options["image_source"],
+            media_type=options.get("media_type", "image"),
+            progress=progress,
+            **_persona_kwargs(options),
+        )
+        JOBS[job_id]["prepared"] = prepared
+        JOBS[job_id]["review"] = _review_payload(job_id)
+        JOBS[job_id]["phase"] = "review"
+        JOBS[job_id]["percent"] = 100
+        JOBS[job_id]["message"] = "Listo para revisar"
+        JOBS[job_id]["status"] = "ready"
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()
         JOBS[job_id]["status"] = "error"

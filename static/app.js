@@ -35,9 +35,11 @@ function switchTab(tab) {
   $("tab-btn-url").classList.toggle("active", tab === "url");
   $("tab-btn-story").classList.toggle("active", tab === "story");
   $("tab-btn-youtube").classList.toggle("active", tab === "youtube");
+  $("tab-btn-tiktok").classList.toggle("active", tab === "tiktok");
   $("tab-url").classList.toggle("hidden", tab !== "url");
   $("tab-story").classList.toggle("hidden", tab !== "story");
   $("tab-youtube").classList.toggle("hidden", tab !== "youtube");
+  $("tab-tiktok").classList.toggle("hidden", tab !== "tiktok");
   // El estilo de guion aplica a Noticia y a YouTube (no al modo Historia)
   $("style-field").style.display = tab === "story" ? "none" : "";
   // El boton cambia segun el modo
@@ -100,6 +102,8 @@ function onGenerate() {
     startDraft();
   } else if (activeTab === "youtube") {
     startYoutube();
+  } else if (activeTab === "tiktok") {
+    startTiktok();
   } else {
     startPrepare();
   }
@@ -164,6 +168,38 @@ async function startYoutube() {
 
   try {
     const resp = await fetch("/api/prepare_youtube", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showError(data.error || "Error desconocido"); return; }
+    currentJob = data.job_id;
+    pollStatus();
+  } catch (e) {
+    showError("No pude contactar al programa. ¿Sigue abierta la ventana negra?\n" + e);
+  }
+}
+
+// ----------------------------------------------------------------------
+//  PASO 1 (TIKTOK): preparar desde un link de video de TikTok
+// ----------------------------------------------------------------------
+async function startTiktok() {
+  const urls = parseLinks($("tiktok_url").value);
+  if (urls.length === 0) {
+    alert("Pega el enlace de un video de TikTok primero.");
+    return;
+  }
+
+  const payload = { urls, url: urls.join("\n"), ...sharedOptions() };
+
+  generateBtn.disabled = true;
+  progressTitle.textContent = urls.length > 1 ? "Leyendo los videos de TikTok..." : "Leyendo el video de TikTok...";
+  show(progressCard);
+  setProgress(3, "Iniciando...");
+
+  try {
+    const resp = await fetch("/api/prepare_tiktok", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -1488,6 +1524,7 @@ function closeAvatarsModal() {
 $("tab-btn-url").addEventListener("click", () => switchTab("url"));
 $("tab-btn-story").addEventListener("click", () => switchTab("story"));
 $("tab-btn-youtube").addEventListener("click", () => switchTab("youtube"));
+$("tab-btn-tiktok").addEventListener("click", () => switchTab("tiktok"));
 
 generateBtn.addEventListener("click", onGenerate);
 assembleBtn.addEventListener("click", startAssemble);

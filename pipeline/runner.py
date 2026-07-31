@@ -519,6 +519,151 @@ def prepare_youtube(
 
 
 # ==========================================================================
+#  PASO 1 (TIKTOK): preparar (subtitulos -> guion + voz + imagenes) a revisar
+# ==========================================================================
+def prepare_tiktok(
+    url,
+    *,
+    duration: int | None = None,
+    style: str | None = None,
+    n_images=None,
+    voice: str | None = None,
+    rate: str | None = None,
+    cta: str | None = None,
+    image_source: str | None = None,
+    media_type: str = "image",
+    progress: ProgressFn = _noop,
+    style_instructions: str = "",
+    persona_name: str = "",
+    podcast: bool = False,
+    voice_a: str = "",
+    voice_b: str = "",
+    speaker_a_name: str = "",
+    speaker_b_name: str = "",
+) -> PreparedJob:
+    """
+    Igual que prepare_youtube, pero el texto sale de uno o VARIOS VIDEOS DE TIKTOK
+    (sus subtitulos o su descripcion) en vez de una noticia. El resto del flujo es
+    identico.
+    """
+    # Import "perezoso" y RESILIENTE: si tu tiktok.py quedo viejo y todavia no
+    # tiene `extract_tiktoks` (la que combina varios videos), lo EMULAMOS usando
+    # `extract_tiktok` (uno por uno). Asi el modo TikTok funciona aunque no se
+    # haya actualizado ese archivo en tu PC.
+    try:
+        from .tiktok import extract_tiktoks
+    except ImportError:
+        from .tiktok import extract_tiktok
+
+        def extract_tiktoks(tk_urls, timeout=25):
+            tk_urls = [u.strip() for u in (tk_urls or []) if u and u.strip()]
+            if not tk_urls:
+                raise ValueError("No diste ningun enlace de TikTok.")
+            if len(tk_urls) == 1:
+                return extract_tiktok(tk_urls[0], timeout=timeout)
+            from .article import Article
+            title = ""
+            parts: list[str] = []
+            errors: list[str] = []
+            for u in tk_urls:
+                try:
+                    art = extract_tiktok(u, timeout=timeout)
+                    if not title:
+                        title = art.title
+                    parts.append(art.text)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"- {u}: {exc}")
+            if not parts:
+                raise ValueError(
+                    "No pude leer NINGUNO de los videos de TikTok. Revisa que "
+                    "tengan subtitulos o descripcion. Detalle:\n" + "\n".join(errors)
+                )
+            return Article(
+                url=tk_urls[0], title=title or "Video de TikTok",
+                text="\n\n".join(parts),
+            )
+
+    cfg = settings
+    # `url` puede ser un solo enlace (texto) o varios (lista). Normalizamos.
+    urls = url if isinstance(url, list) else [url]
+    duration = duration or cfg.video_duration
+    voice = voice or cfg.tts_voice
+    voice = _resolve_voice(voice)   # si es "automatica", elige una del grupo (rotando)
+    rate = rate if rate is not None else cfg.tts_rate
+    style = style or cfg.script_style
+    cta = cta or cfg.call_to_action
+    image_source = (image_source or cfg.image_source or "hybrid").lower()
+
+    if podcast:
+        voice_a = _resolve_voice(voice_a or voice)
+        voice_b = _resolve_voice(voice_b or cfg.tts_voice)
+        voice = voice_a
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    job_dir = cfg.work_dir / f"job_{stamp}"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    images_dir = job_dir / "images"
+
+    # 1) Leer el texto del/los video(s) de TikTok y combinarlos
+    n = len([u for u in urls if str(u).strip()])
+    progress(
+        "Leyendo el video de TikTok..." if n <= 1
+        else f"Leyendo {n} videos de TikTok...",
+        8,
+    )
+    article = extract_tiktoks(urls)
+
+    # 2) Guion en escenas (mismo motor que el modo noticia)
+    progress("Escribiendo el guion viral con IA...", 25)
+    script = generate_script(
+        article, duration=duration, style=style, cta=cta, n_images=n_images,
+        style_instructions=style_instructions,
+        podcast=podcast, speaker_a=speaker_a_name, speaker_b=speaker_b_name,
+    )
+    print(f"[guion] {len(script.scenes)} escenas generadas (desde TikTok)")
+
+    # 3) Voz
+    progress("Generando la voz en espanol...", 45)
+    audio = synthesize_voice(
+        script.narration, voice=voice, rate=rate, out_path=job_dir / "voz.mp3"
+    )
+    real_duration = probe_duration(audio.audio_path) or audio.duration or float(duration)
+
+    # 4) Medios por escena (fotos o videoclips)
+    images = _fetch_media(script.scenes, images_dir, media_type, image_source, progress)
+    for im in images:
+        print(f"[medios] {im.source}: {im.query[:60]}")
+
+    progress("Listo para revisar imagenes!", 100)
+
+    return PreparedJob(
+        job_dir=job_dir,
+        title=article.title,
+        narration=script.narration,
+        scenes=script.scenes,
+        images=images,
+        audio_path=audio.audio_path,
+        audio_words=audio.words,
+        real_duration=real_duration,
+        titles=script.titles,
+        hashtags=script.hashtags,
+        image_source=image_source,
+        media_type=media_type,
+        warning=script.warning,
+        voice=voice,
+        rate=rate,
+        synth_narration=script.narration,
+        podcast=podcast,
+        voice_a=voice_a,
+        voice_b=voice_b,
+        speaker_a_name=speaker_a_name,
+        speaker_b_name=speaker_b_name,
+        style_instructions=style_instructions,
+        persona_name=persona_name,
+    )
+
+
+# ==========================================================================
 #  MODO HISTORIA - PASO A: crear el BORRADOR (guion + prompts, SIN imagenes)
 # ==========================================================================
 def draft_story(
