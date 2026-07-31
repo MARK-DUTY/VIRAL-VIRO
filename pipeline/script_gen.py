@@ -410,8 +410,13 @@ REQUISITOS:
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
 - En "text" escribe con PUNTUACION correcta y natural: usa PUNTOS para separar
-  las oraciones, y signos de exclamacion (¡!) e interrogacion (¿?) donde ayuden a
-  la entonacion. Conserva SIEMPRE los acentos y la ortografia correcta.
+  las oraciones y signos de interrogacion (¿?) donde ayuden a la entonacion.
+  Conserva SIEMPRE los acentos y la ortografia correcta.
+- USA BASTANTES signos de exclamacion para darle ENERGIA y emocion al guion:
+  abre con ¡ y cierra con ! en todas las frases con fuerza, entusiasmo o sorpresa
+  (ejemplo: ¡Esto te va a encantar! ¡No lo vas a creer!). Entre mas expresivo y
+  emocionado suene, mejor. Recuerda SIEMPRE poner el signo de apertura ¡ y el de
+  cierre !.
 {_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
@@ -494,8 +499,13 @@ REQUISITOS:
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
 - En "text" escribe con PUNTUACION correcta y natural: usa PUNTOS para separar
-  las oraciones, y signos de exclamacion (¡!) e interrogacion (¿?) donde ayuden a
-  la entonacion. Conserva SIEMPRE los acentos y la ortografia correcta.
+  las oraciones y signos de interrogacion (¿?) donde ayuden a la entonacion.
+  Conserva SIEMPRE los acentos y la ortografia correcta.
+- USA BASTANTES signos de exclamacion para darle ENERGIA y emocion al guion:
+  abre con ¡ y cierra con ! en todas las frases con fuerza, entusiasmo o sorpresa
+  (ejemplo: ¡Esto te va a encantar! ¡No lo vas a creer!). Entre mas expresivo y
+  emocionado suene, mejor. Recuerda SIEMPRE poner el signo de apertura ¡ y el de
+  cierre !.
 {_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
