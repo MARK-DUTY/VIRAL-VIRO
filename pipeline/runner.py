@@ -295,6 +295,11 @@ def prepare_video(
     voice_b: str = "",
     speaker_a_name: str = "",
     speaker_b_name: str = "",
+    # --- CONTROL DEL CONDUCTOR: gancho (inicio de escena), remate (final de
+    #     escena) y palabras a resaltar. Vacio = usar lo de fabrica del estilo. ---
+    hook_style: str = "",
+    closer_style: str = "",
+    emphasis_words: str = "",
 ) -> PreparedJob:
     cfg = settings
     # `url` puede ser un solo enlace (texto) o varios (lista). Normalizamos.
@@ -329,6 +334,7 @@ def prepare_video(
         article, duration=duration, style=style, cta=cta, n_images=n_images,
         style_instructions=style_instructions,
         podcast=podcast, speaker_a=speaker_a_name, speaker_b=speaker_b_name,
+        hook_style=hook_style, closer_style=closer_style, emphasis_words=emphasis_words,
     )
     print(f"[guion] {len(script.scenes)} escenas generadas")
 
@@ -396,6 +402,11 @@ def prepare_youtube(
     voice_b: str = "",
     speaker_a_name: str = "",
     speaker_b_name: str = "",
+    # --- CONTROL DEL CONDUCTOR: gancho (inicio de escena), remate (final de
+    #     escena) y palabras a resaltar. Vacio = usar lo de fabrica del estilo. ---
+    hook_style: str = "",
+    closer_style: str = "",
+    emphasis_words: str = "",
 ) -> PreparedJob:
     """
     Igual que prepare_video, pero el texto sale de uno o VARIOS VIDEOS DE YOUTUBE
@@ -474,6 +485,7 @@ def prepare_youtube(
         article, duration=duration, style=style, cta=cta, n_images=n_images,
         style_instructions=style_instructions,
         podcast=podcast, speaker_a=speaker_a_name, speaker_b=speaker_b_name,
+        hook_style=hook_style, closer_style=closer_style, emphasis_words=emphasis_words,
     )
     print(f"[guion] {len(script.scenes)} escenas generadas (desde YouTube)")
 
@@ -540,6 +552,11 @@ def prepare_tiktok(
     voice_b: str = "",
     speaker_a_name: str = "",
     speaker_b_name: str = "",
+    # --- CONTROL DEL CONDUCTOR: gancho (inicio de escena), remate (final de
+    #     escena) y palabras a resaltar. Vacio = usar lo de fabrica del estilo. ---
+    hook_style: str = "",
+    closer_style: str = "",
+    emphasis_words: str = "",
 ) -> PreparedJob:
     """
     Igual que prepare_youtube, pero el texto sale de uno o VARIOS VIDEOS DE TIKTOK
@@ -619,6 +636,7 @@ def prepare_tiktok(
         article, duration=duration, style=style, cta=cta, n_images=n_images,
         style_instructions=style_instructions,
         podcast=podcast, speaker_a=speaker_a_name, speaker_b=speaker_b_name,
+        hook_style=hook_style, closer_style=closer_style, emphasis_words=emphasis_words,
     )
     print(f"[guion] {len(script.scenes)} escenas generadas (desde TikTok)")
 
@@ -684,6 +702,11 @@ def draft_story(
     voice_b: str = "",
     speaker_a_name: str = "",
     speaker_b_name: str = "",
+    # --- CONTROL DEL CONDUCTOR: gancho (inicio de escena), remate (final de
+    #     escena) y palabras a resaltar. Vacio = usar lo de fabrica del estilo. ---
+    hook_style: str = "",
+    closer_style: str = "",
+    emphasis_words: str = "",
 ) -> PreparedJob:
     """
     Convierte la HISTORIA del usuario en un guion dividido en escenas con su
@@ -713,6 +736,7 @@ def draft_story(
         story, duration=duration, n_images=n_images, cta=cta,
         style_instructions=style_instructions,
         podcast=podcast, speaker_a=speaker_a_name, speaker_b=speaker_b_name,
+        hook_style=hook_style, closer_style=closer_style, emphasis_words=emphasis_words,
     )
     print(f"[historia] {len(script.scenes)} escenas/prompts generados")
 

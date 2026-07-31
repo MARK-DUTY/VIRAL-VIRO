@@ -262,6 +262,37 @@ def _persona_block(style_instructions: str) -> str:
     )
 
 
+def _director_block(hook_style: str = "", closer_style: str = "", emphasis_words: str = "") -> str:
+    """
+    Bloque de DIRECCION del conductor: como abrir (gancho) y cerrar (remate)
+    CADA escena, y que palabras resaltar. Todo es opcional; si viene vacio, no
+    se agrega nada y el guion se comporta como siempre.
+    """
+    hook_style = (hook_style or "").strip()
+    closer_style = (closer_style or "").strip()
+    emphasis_words = (emphasis_words or "").strip()
+    if not (hook_style or closer_style or emphasis_words):
+        return ""
+
+    parts = ["\nDIRECCION DEL CONDUCTOR (MUY IMPORTANTE, aplica escena por escena):"]
+    if hook_style:
+        parts.append(
+            f"- GANCHO: cada escena debe ARRANCAR con un gancho asi: {hook_style} "
+            "El gancho debe sentirse natural y enganchar en la primera frase."
+        )
+    if closer_style:
+        parts.append(
+            f"- REMATE: cada escena debe TERMINAR con un remate asi: {closer_style} "
+            "El remate cierra la idea y da pie a la siguiente escena."
+        )
+    if emphasis_words:
+        parts.append(
+            f"- PALABRAS A RESALTAR: da mas fuerza y protagonismo a estas palabras "
+            f"o ideas cuando aparezcan: {emphasis_words}."
+        )
+    return "\n".join(parts) + "\n"
+
+
 def _podcast_block(podcast: bool, speaker_a: str, speaker_b: str) -> str:
     """
     Bloque de instrucciones para el MODO PODCAST (dos personas conversando).
@@ -338,6 +369,9 @@ def _build_prompt(
     podcast: bool = False,
     speaker_a: str = "",
     speaker_b: str = "",
+    hook_style: str = "",
+    closer_style: str = "",
+    emphasis_words: str = "",
 ) -> list[dict]:
     target_words = int(duration * _WORDS_PER_SECOND)
     min_words = max(1, target_words - _tolerance_words(duration))
@@ -375,7 +409,7 @@ REQUISITOS:
 - La PRIMERA escena debe ser un GANCHO que enganche en los primeros 3 segundos.
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
-{_persona_block(style_instructions)}{_podcast_block(podcast, speaker_a, speaker_b)}
+{_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
   concreta, una imagen que represente EXACTAMENTE lo que se narra en esa escena.
@@ -414,6 +448,9 @@ def _build_story_prompt(
     podcast: bool = False,
     speaker_a: str = "",
     speaker_b: str = "",
+    hook_style: str = "",
+    closer_style: str = "",
+    emphasis_words: str = "",
 ) -> list[dict]:
     """
     Construye el prompt para cuando el usuario ESCRIBE su propia historia
@@ -453,7 +490,7 @@ REQUISITOS:
 - La PRIMERA escena debe ser un GANCHO que enganche en los primeros 3 segundos.
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
-{_persona_block(style_instructions)}{_podcast_block(podcast, speaker_a, speaker_b)}
+{_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
   concreta, una imagen que represente EXACTAMENTE lo que se narra en esa escena,
@@ -873,6 +910,9 @@ def generate_script(
     podcast: bool = False,
     speaker_a: str = "",
     speaker_b: str = "",
+    hook_style: str = "",
+    closer_style: str = "",
+    emphasis_words: str = "",
 ) -> VideoScript:
     """Llama a Groq y devuelve un VideoScript con escenas listo para usar (desde NOTICIA).
 
@@ -895,6 +935,7 @@ def generate_script(
         article, duration, style, cta, n_scenes,
         style_instructions=style_instructions,
         podcast=podcast, speaker_a=speaker_a, speaker_b=speaker_b,
+        hook_style=hook_style, closer_style=closer_style, emphasis_words=emphasis_words,
     )
     script = _parse_script(_call_groq(messages, timeout=timeout, max_tokens=max_tokens))
 
@@ -932,6 +973,9 @@ def generate_script_from_story(
     podcast: bool = False,
     speaker_a: str = "",
     speaker_b: str = "",
+    hook_style: str = "",
+    closer_style: str = "",
+    emphasis_words: str = "",
 ) -> VideoScript:
     """
     Llama a Groq y devuelve un VideoScript a partir de una HISTORIA escrita
@@ -960,6 +1004,7 @@ def generate_script_from_story(
         story, duration, n_scenes, cta,
         style_instructions=style_instructions,
         podcast=podcast, speaker_a=speaker_a, speaker_b=speaker_b,
+        hook_style=hook_style, closer_style=closer_style, emphasis_words=emphasis_words,
     )
     script = _parse_script(_call_groq(messages, timeout=timeout, max_tokens=max_tokens))
 

@@ -265,9 +265,33 @@
               <span>Estilo de personalidad (si no eliges avatar)</span>
               <select id="style-key">
                 {% for s in persona_styles %}
-                <option value="{{ s.value }}">{{ s.label }}</option>
+                <option value="{{ s.value }}" data-hook="{{ s.hook }}" data-closer="{{ s.closer }}">{{ s.label }}</option>
                 {% endfor %}
               </select>
+            </label>
+          </div>
+
+          <!-- CONTROL DEL CONDUCTOR (opcional): como habla, como abre (gancho)
+               y como cierra (remate) cada escena, y que palabras resaltar. -->
+          <div id="conductor-box">
+            <p class="hint" style="margin-top:10px;"><strong>🎤 Control del conductor (opcional).</strong> El conductor que elegiste ya trae su gancho y su remate <em>de fábrica</em>. Si quieres, cámbialos aquí y el guion se generará con TU estilo.</p>
+            <label class="field">
+              <span>¿Cómo quieres que hable? (escríbelo tú, opcional)</span>
+              <input type="text" id="conductor_custom" placeholder="Ej: como la chismosa del barrio, con mucho drama y confianza">
+            </label>
+            <div class="row">
+              <label class="field">
+                <span>Estilo del GANCHO (inicio de cada escena)</span>
+                <input type="text" id="hook_style" placeholder="(de fábrica según el conductor)">
+              </label>
+              <label class="field">
+                <span>Estilo del REMATE (final de cada escena)</span>
+                <input type="text" id="closer_style" placeholder="(de fábrica según el conductor)">
+              </label>
+            </div>
+            <label class="field">
+              <span>Palabras o ideas a RESALTAR (opcional, separadas por coma)</span>
+              <input type="text" id="emphasis_words" placeholder="Ej: oferta, gratis, hoy mismo">
             </label>
           </div>
         </div>

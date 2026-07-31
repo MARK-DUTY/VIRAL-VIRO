@@ -110,8 +110,19 @@ app = Flask(__name__)
 #  por pais) + estilo de hablar (serio, chismoso, galan...). El estilo cambia
 #  COMO ESCRIBE la IA el guion; el acento lo pone la voz elegida.
 # ==========================================================================
+#  Cada "conductor" (estilo) trae 3 cosas:
+#    - instructions: COMO habla en todo el guion (personalidad / tono).
+#    - hook: como ABRE cada escena (el "gancho" de fabrica de ese conductor).
+#    - closer: como REMATA cada escena (el "remate" de fabrica de ese conductor).
+#  El usuario puede DEJAR los de fabrica o ESCRIBIR los suyos en la pantalla; si
+#  escribe los suyos, esos mandan (ver _resolve_persona_options).
 STYLE_PRESETS: dict[str, dict] = {
-    "neutral": {"label": "Normal / neutral", "instructions": ""},
+    "neutral": {
+        "label": "Normal / neutral",
+        "instructions": "",
+        "hook": "",
+        "closer": "",
+    },
     "serio_noticiero": {
         "label": "Noticiero serio (formal)",
         "instructions": (
@@ -119,6 +130,14 @@ STYLE_PRESETS: dict[str, dict] = {
             "de noticiero nocturno de television. Frases claras y con autoridad, "
             "vocabulario correcto, sin bromas ni palabras coloquiales. Transmite "
             "credibilidad y seriedad."
+        ),
+        "hook": (
+            "Abre cada escena como un titular de noticiero: directo y contundente, "
+            "con el dato o hecho mas fuerte por delante para captar la atencion."
+        ),
+        "closer": (
+            "Remata cada escena con una frase seria de cierre informativo que "
+            "invite a seguir atento a lo que viene."
         ),
     },
     "comico": {
@@ -129,6 +148,14 @@ STYLE_PRESETS: dict[str, dict] = {
             "sentido ligero (sin groserias) y comentarios divertidos, pero sin "
             "perder el hilo de lo que se cuenta. Que de risa y sea muy expresivo."
         ),
+        "hook": (
+            "Abre cada escena con un chiste, una ocurrencia o una comparacion "
+            "exagerada que haga reir de inmediato."
+        ),
+        "closer": (
+            "Remata cada escena con una frase graciosa o un chascarrillo que deje "
+            "al espectador sonriendo."
+        ),
     },
     "espectaculos": {
         "label": "Espectaculos / farandula",
@@ -137,6 +164,14 @@ STYLE_PRESETS: dict[str, dict] = {
             "y farandula. Muy emocionado, curioso, con exclamaciones y frases de "
             "'no lo vas a creer'. Genera intriga y mantiene la atencion como en un "
             "programa de chismes de la tele."
+        ),
+        "hook": (
+            "Abre cada escena con intriga de farandula: 'no vas a creer lo que "
+            "paso', dejando picado al espectador desde la primera frase."
+        ),
+        "closer": (
+            "Remata cada escena dejando suspenso o soltando un 'y eso no es todo' "
+            "para enganchar con la siguiente."
         ),
     },
     "chismosa": {
@@ -147,6 +182,14 @@ STYLE_PRESETS: dict[str, dict] = {
             "'ay comadre', 'no me lo vas a creer', 'te cuento'. Muy coloquial y "
             "entretenida, como platicando en la esquina."
         ),
+        "hook": (
+            "Abre cada escena en confianza, como contando el chisme del barrio: "
+            "'ay comadre, ya supiste', bajando la voz como secreto."
+        ),
+        "closer": (
+            "Remata cada escena con drama y complicidad: 'te lo juro', 'ni te "
+            "imaginas lo que sigue', dejando ganas de mas chisme."
+        ),
     },
     "galan": {
         "label": "Galan presumido",
@@ -156,6 +199,13 @@ STYLE_PRESETS: dict[str, dict] = {
             "conquistador simpatico (sin faltar al respeto). Que suene carismatico "
             "y un poco payaso."
         ),
+        "hook": (
+            "Abre cada escena con actitud galante y presumida, echandose flores "
+            "mientras engancha al espectador."
+        ),
+        "closer": (
+            "Remata cada escena con un piropo o una frase coqueta y confiada."
+        ),
     },
     "motivador": {
         "label": "Motivador / coach",
@@ -164,12 +214,60 @@ STYLE_PRESETS: dict[str, dict] = {
             "Frases que animan, con fuerza y entusiasmo, que dejan al espectador "
             "con ganas de actuar."
         ),
+        "hook": (
+            "Abre cada escena con una frase de energia que rete o inspire al "
+            "espectador desde el primer segundo."
+        ),
+        "closer": (
+            "Remata cada escena con un empujon motivador que invite a actuar ya."
+        ),
     },
     "dramatico": {
         "label": "Dramatico / suspenso",
         "instructions": (
             "Escribe con tono dramatico y de suspenso, como narrador de historias "
             "de misterio. Crea tension, pausas de intriga y un final que sorprenda."
+        ),
+        "hook": (
+            "Abre cada escena creando tension y misterio, como narrador de "
+            "suspenso que atrapa desde la primera linea."
+        ),
+        "closer": (
+            "Remata cada escena con un giro o una pregunta inquietante que deje "
+            "con ganas de saber mas."
+        ),
+    },
+    "vendedor_mercado": {
+        "label": "Pregonero / vendedor de mercado",
+        "instructions": (
+            "Escribe con la energia de un vendedor de mercado o pregonero: "
+            "efusivo, insistente y simpatico, como quien vocea su mercancia. Usa "
+            "expresiones tipo 'pasele, pasele', 'llevelo, llevelo', 'barato, "
+            "barato'. Muy vivo, alegre y persuasivo."
+        ),
+        "hook": (
+            "Abre cada escena voceando como en el mercado: 'pasele, pasele que "
+            "aqui esta lo bueno', llamando la atencion con energia alegre."
+        ),
+        "closer": (
+            "Remata cada escena con cierre de vendedor: 'llevelo, llevelo', 'no se "
+            "quede sin el suyo', 'aproveche'."
+        ),
+    },
+    "influencer": {
+        "label": "Influencer juvenil (TikToker)",
+        "instructions": (
+            "Escribe como un influencer joven de TikTok: fresco, actual y cercano, "
+            "hablandole a la camara de tu. Ritmo rapido, mucha cercania y "
+            "expresiones juveniles naturales (sin exagerar)."
+        ),
+        "hook": (
+            "Abre cada escena hablando directo a la camara con gancho tipo TikTok: "
+            "'espera, esto tienes que verlo' o 'nadie te cuenta esto, pero'."
+        ),
+        "closer": (
+            "Remata cada escena invitando a interactuar: 'sigueme para la parte 2', "
+            "'comenta si te paso', 'guardalo para despues'."
         ),
     },
 }
@@ -199,8 +297,20 @@ _PERSONAS_LOCK = threading.Lock()
 
 
 def style_options() -> list[dict]:
-    """Lista de estilos para el menu de la interfaz."""
-    return [{"value": k, "label": v["label"]} for k, v in STYLE_PRESETS.items()]
+    """Lista de estilos (conductores) para el menu de la interfaz.
+
+    Incluye el gancho y el remate DE FABRICA de cada conductor, para que la
+    interfaz pueda mostrarlos como sugerencia (y el usuario los cambie si quiere).
+    """
+    return [
+        {
+            "value": k,
+            "label": v["label"],
+            "hook": v.get("hook", ""),
+            "closer": v.get("closer", ""),
+        }
+        for k, v in STYLE_PRESETS.items()
+    ]
 
 
 def style_instructions_for(style: str, custom_style: str = "") -> str:
@@ -209,6 +319,18 @@ def style_instructions_for(style: str, custom_style: str = "") -> str:
         return (custom_style or "").strip()
     preset = STYLE_PRESETS.get((style or "").strip().lower())
     return preset["instructions"] if preset else ""
+
+
+def hook_default_for(style: str) -> str:
+    """Gancho DE FABRICA del conductor elegido (si tiene)."""
+    preset = STYLE_PRESETS.get((style or "").strip().lower())
+    return preset.get("hook", "") if preset else ""
+
+
+def closer_default_for(style: str) -> str:
+    """Remate DE FABRICA del conductor elegido (si tiene)."""
+    preset = STYLE_PRESETS.get((style or "").strip().lower())
+    return preset.get("closer", "") if preset else ""
 
 
 def _persona_country_for_voice(voice: str) -> str:
@@ -396,7 +518,18 @@ def _resolve_persona_options(data: dict) -> dict:
         "speaker_a_name": "",
         "speaker_b_name": "",
         "voice_override": "",
+        # Control del conductor: gancho (inicio de escena), remate (final de
+        # escena) y palabras a resaltar. Vacio = usar lo de fabrica del estilo.
+        "hook_style": "",
+        "closer_style": "",
+        "emphasis_words": "",
     }
+
+    # Campos que el usuario puede escribir para MANDAR sobre lo de fabrica.
+    conductor_custom = (data.get("conductor_custom") or "").strip()
+    hook_style = (data.get("hook_style") or "").strip()
+    closer_style = (data.get("closer_style") or "").strip()
+    emphasis_words = (data.get("emphasis_words") or "").strip()
 
     podcast = bool(data.get("podcast"))
 
@@ -435,17 +568,35 @@ def _resolve_persona_options(data: dict) -> dict:
 
     # --- Narrador unico ---
     persona = personas_mod.get_persona(data.get("avatar_id") or "")
+    base_style_key = ""
     if persona:
         out["persona_name"] = persona["name"]
         out["voice_override"] = persona["voice"]
         out["style_instructions"] = personas_mod.style_instructions_for(
             persona["style"], persona.get("custom_style", "")
         )
+        base_style_key = (persona.get("style") or "").strip()
     else:
         # Sin avatar guardado: se puede elegir solo un estilo (preset).
-        style_key = (data.get("style_key") or "").strip()
-        if style_key:
-            out["style_instructions"] = personas_mod.style_instructions_for(style_key, "")
+        base_style_key = (data.get("style_key") or "").strip()
+        if base_style_key:
+            out["style_instructions"] = personas_mod.style_instructions_for(base_style_key, "")
+
+    # 1) CONDUCTOR PERSONALIZADO (texto libre): si el usuario escribio como quiere
+    #    que hable, eso MANDA (se agrega al tono, reforzandolo).
+    if conductor_custom:
+        if out["style_instructions"]:
+            out["style_instructions"] += " " + conductor_custom
+        else:
+            out["style_instructions"] = conductor_custom
+
+    # 2) GANCHO y REMATE: si el usuario escribio los suyos, mandan; si no, se usan
+    #    los DE FABRICA del conductor elegido.
+    out["hook_style"] = hook_style or personas_mod.hook_default_for(base_style_key)
+    out["closer_style"] = closer_style or personas_mod.closer_default_for(base_style_key)
+
+    # 3) PALABRAS A RESALTAR (opcional): tal cual lo escribio el usuario.
+    out["emphasis_words"] = emphasis_words
     return out
 
 
@@ -461,6 +612,9 @@ def _merge_persona_into_options(options: dict, data: dict) -> None:
     options["voice_b"] = persona["voice_b"]
     options["speaker_a_name"] = persona["speaker_a_name"]
     options["speaker_b_name"] = persona["speaker_b_name"]
+    options["hook_style"] = persona["hook_style"]
+    options["closer_style"] = persona["closer_style"]
+    options["emphasis_words"] = persona["emphasis_words"]
 
 
 def _persona_kwargs(options: dict) -> dict:
@@ -473,6 +627,9 @@ def _persona_kwargs(options: dict) -> dict:
         "voice_b": options.get("voice_b", ""),
         "speaker_a_name": options.get("speaker_a_name", ""),
         "speaker_b_name": options.get("speaker_b_name", ""),
+        "hook_style": options.get("hook_style", ""),
+        "closer_style": options.get("closer_style", ""),
+        "emphasis_words": options.get("emphasis_words", ""),
     }
 
 

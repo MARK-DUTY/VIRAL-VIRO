@@ -83,8 +83,29 @@ function sharedOptions() {
   } else {
     opts.avatar_id = $("avatar-select") ? $("avatar-select").value : "";
     opts.style_key = $("style-key") ? $("style-key").value : "";
+    // Control del conductor (opcional): texto libre de tono, gancho, remate y
+    // palabras a resaltar. Si van vacios, el backend usa los de fabrica.
+    opts.conductor_custom = $("conductor_custom") ? $("conductor_custom").value.trim() : "";
+    opts.hook_style = $("hook_style") ? $("hook_style").value.trim() : "";
+    opts.closer_style = $("closer_style") ? $("closer_style").value.trim() : "";
+    opts.emphasis_words = $("emphasis_words") ? $("emphasis_words").value.trim() : "";
   }
   return opts;
+}
+
+// Muestra el gancho y el remate DE FABRICA del conductor elegido como pista
+// (placeholder) en las cajas, para que el usuario vea que traen y pueda
+// cambiarlos. No borra lo que el usuario ya haya escrito.
+function updateConductorDefaults() {
+  const sel = $("style-key");
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const hook = (opt && opt.getAttribute("data-hook")) || "";
+  const closer = (opt && opt.getAttribute("data-closer")) || "";
+  const hookBox = $("hook_style");
+  const closerBox = $("closer_style");
+  if (hookBox) hookBox.placeholder = hook || "(de fábrica según el conductor)";
+  if (closerBox) closerBox.placeholder = closer || "(de fábrica según el conductor)";
 }
 
 // Muestra un aviso cuando el usuario elige un video largo (2 min o mas),
@@ -1525,6 +1546,12 @@ $("tab-btn-url").addEventListener("click", () => switchTab("url"));
 $("tab-btn-story").addEventListener("click", () => switchTab("story"));
 $("tab-btn-youtube").addEventListener("click", () => switchTab("youtube"));
 $("tab-btn-tiktok").addEventListener("click", () => switchTab("tiktok"));
+
+// Conductor: al cambiar de estilo, mostrar su gancho/remate de fábrica como pista.
+if ($("style-key")) {
+  $("style-key").addEventListener("change", updateConductorDefaults);
+  updateConductorDefaults();
+}
 
 generateBtn.addEventListener("click", onGenerate);
 assembleBtn.addEventListener("click", startAssemble);
