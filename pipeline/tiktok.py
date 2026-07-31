@@ -44,10 +44,21 @@ _USER_AGENTS = [
 ]
 
 # Cabecera base para que TikTok nos responda como si fueramos un navegador normal.
+# Cuanto mas "de navegador real" se vea, mas probable es que nos entregue la
+# pagina COMPLETA (con los datos del video) en vez de una version recortada.
 _HEADERS = {
     "User-Agent": _USER_AGENTS[0],
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Referer": "https://www.tiktok.com/",
+    "Upgrade-Insecure-Requests": "1",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
     # Cookie que le dice a TikTok que ya elegimos region/consentimiento. Reduce
     # el riesgo de que nos mande a una pantalla intermedia.
     "Cookie": "tt_csrf_token=1; tt_chain_token=1",
@@ -306,6 +317,55 @@ def _hashtags_text(item: dict) -> str:
     return " ".join(tags)
 
 
+def _stickers_text(item: dict) -> str:
+    """
+    Saca el TEXTO PEGADO en pantalla (las "calcomanias"/stickers que el creador
+    escribe encima del video, ej: 'MINIALERTA DE OFERTA', '-57% Descuento').
+    Es texto muy util porque suele ser el mensaje principal del video.
+    """
+    pieces: list[str] = []
+    for st in item.get("stickersOnItem") or []:
+        for t in st.get("stickerText") or []:
+            t = (t or "").replace("\n", " ").strip()
+            if t:
+                pieces.append(t)
+    return " ".join(pieces)
+
+
+def _join_unique(parts: list[str]) -> str:
+    """Une varios textos en uno, saltando los que se repiten identicos."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        p = (p or "").strip()
+        if p and p.lower() not in seen:
+            seen.add(p.lower())
+            out.append(p)
+    return " ".join(out)
+
+
+def _oembed(url: str, timeout: int = 20) -> tuple[str, str]:
+    """
+    RESPALDO robusto: la API publica oEmbed de TikTok.
+
+    Funciona SIN inicio de sesion y desde cualquier pais, aunque TikTok le
+    entregue a la PC del usuario una pagina recortada (sin los datos del video).
+    Devuelve (descripcion/titulo, nombre del autor). Si falla, ("", "").
+    """
+    try:
+        resp = requests.get(
+            "https://www.tiktok.com/oembed",
+            params={"url": url},
+            headers={"User-Agent": _USER_AGENTS[0], "Accept": "application/json"},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return (data.get("title") or "").strip(), (data.get("author_name") or "").strip()
+    except Exception:
+        return "", ""
+
+
 def extract_tiktok(url: str, timeout: int = 25) -> Article:
     """
     Lee un video de TikTok y devuelve un Article (url + titulo + texto).
@@ -315,44 +375,70 @@ def extract_tiktok(url: str, timeout: int = 25) -> Article:
     mensaje claro si no hay suficiente texto para crear un guion.
     """
     final_url = _normalize_url(url, timeout=timeout)
-    page = _http_get(final_url, timeout=timeout).text
 
-    item = _get_item_struct(page)
+    # 1) Bajamos la pagina del video. Si TikTok bloquea, seguimos con oEmbed.
+    page = ""
+    try:
+        page = _http_get(final_url, timeout=timeout).text
+    except TikTokBlockedError:
+        page = ""
+
+    item = _get_item_struct(page) if page else None
 
     title = ""
-    description = ""
-    hashtags = ""
-    transcript = ""
+    nickname = ""
+    parts: list[str] = []
 
     if item:
         author = item.get("author") or {}
         nickname = (author.get("nickname") or author.get("uniqueId") or "").strip()
         description = (item.get("desc") or "").strip()
         hashtags = _hashtags_text(item)
+        stickers = _stickers_text(item)          # texto PEGADO en pantalla
         title = description[:80].strip() or (f"Video de {nickname}" if nickname else "")
+
+        # Subtitulos automaticos (texto hablado). OJO: su enlace es un CDN firmado
+        # que a veces se bloquea segun el pais; por eso NO dependemos solo de esto.
+        transcript = ""
         track = _pick_subtitle(item)
         if track:
             transcript = _fetch_subtitle_text(track, timeout=timeout)
 
+        # Juntamos TODO el texto disponible (sin repetir): lo hablado + lo pegado
+        # en pantalla + la descripcion + los hashtags. Asi hay material de sobra.
+        parts = [transcript, stickers, description, hashtags]
+
+    text = _clean(_join_unique(parts))
+
+    # 2) RESPALDO oEmbed: si con la pagina no juntamos suficiente texto (por
+    #    bloqueo o pagina recortada segun la region), pedimos la descripcion por
+    #    la API publica de TikTok, que funciona desde cualquier pais.
+    if len(text) < 120:
+        o_desc, o_author = _oembed(final_url, timeout=timeout)
+        if o_author and not nickname:
+            nickname = o_author
+        if o_desc:
+            if not title:
+                title = o_desc[:80].strip()
+            if o_desc.lower() not in text.lower():
+                text = _clean((text + " " + o_desc).strip())
+
     # Respaldo del titulo: la etiqueta <title> de la pagina
-    if not title:
+    if not title and page:
         m = re.search(r"<title[^>]*>(.*?)</title>", page, re.IGNORECASE | re.DOTALL)
         if m:
             title = re.sub(r"\s+", " ", m.group(1)).replace(" | TikTok", "").strip()
-    title = _clean(title) or "Video de TikTok"
-
-    # Texto base: preferimos los subtitulos; si no hay, la descripcion + hashtags.
-    fallback = " ".join(p for p in (description, hashtags) if p)
-    text = _clean(transcript or fallback)
+    title = _clean(title) or (f"Video de {nickname}" if nickname else "Video de TikTok")
 
     article = Article(url=url, title=title, text=text)
     if not article.is_usable:
         raise ValueError(
-            "Pude abrir el TikTok, pero no encontre subtitulos ni una descripcion "
-            "con suficiente texto para armar un guion. Los videos cortos suelen "
-            "traer poco texto escrito. Prueba con un video que tenga subtitulos "
-            "activados (auto-captions) o una descripcion mas larga; tambien puedes "
-            "pegar 2 o 3 TikToks del mismo tema para juntar mas material."
+            "Pude abrir el TikTok, pero no encontre suficiente texto para armar un "
+            "guion (ni subtitulos, ni texto en pantalla, ni una descripcion larga). "
+            "Los videos muy cortos a veces traen poco texto escrito. Prueba con un "
+            "video que tenga subtitulos, texto en pantalla o una descripcion mas "
+            "larga; tambien puedes pegar 2 o 3 TikToks del mismo tema para juntar "
+            "mas material."
         )
     return article
 
