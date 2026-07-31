@@ -412,10 +412,12 @@ REQUISITOS:
 - En "text" escribe con PUNTUACION correcta y natural: usa PUNTOS para separar
   las oraciones y signos de interrogacion (¿?) donde ayuden a la entonacion.
   Conserva SIEMPRE los acentos y la ortografia correcta.
-- USA BASTANTES signos de exclamacion para darle ENERGIA y emocion al guion:
-  abre con ¡ y cierra con ! en todas las frases con fuerza, entusiasmo o sorpresa
-  (ejemplo: ¡Esto te va a encantar! ¡No lo vas a creer!). Entre mas expresivo y
-  emocionado suene, mejor. Recuerda SIEMPRE poner el signo de apertura ¡ y el de
+- MUY IMPORTANTE (ENERGIA): CADA escena debe EMPEZAR con una frase entre signos
+  de exclamacion (¡...!). Ademas usa MUCHOS signos de exclamacion mas a lo largo
+  de cada escena, en toda frase con fuerza, entusiasmo o sorpresa. Abre SIEMPRE
+  con ¡ y cierra con ! (ejemplo: ¡Esto te va a encantar! ¡No lo vas a creer! ¡Mira
+  lo que acaban de descubrir!). Cuantos mas signos de exclamacion y mas expresivo
+  y emocionado suene, MEJOR. No olvides NUNCA el signo de apertura ¡ ni el de
   cierre !.
 {_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
@@ -501,10 +503,12 @@ REQUISITOS:
 - En "text" escribe con PUNTUACION correcta y natural: usa PUNTOS para separar
   las oraciones y signos de interrogacion (¿?) donde ayuden a la entonacion.
   Conserva SIEMPRE los acentos y la ortografia correcta.
-- USA BASTANTES signos de exclamacion para darle ENERGIA y emocion al guion:
-  abre con ¡ y cierra con ! en todas las frases con fuerza, entusiasmo o sorpresa
-  (ejemplo: ¡Esto te va a encantar! ¡No lo vas a creer!). Entre mas expresivo y
-  emocionado suene, mejor. Recuerda SIEMPRE poner el signo de apertura ¡ y el de
+- MUY IMPORTANTE (ENERGIA): CADA escena debe EMPEZAR con una frase entre signos
+  de exclamacion (¡...!). Ademas usa MUCHOS signos de exclamacion mas a lo largo
+  de cada escena, en toda frase con fuerza, entusiasmo o sorpresa. Abre SIEMPRE
+  con ¡ y cierra con ! (ejemplo: ¡Esto te va a encantar! ¡No lo vas a creer! ¡Mira
+  lo que acaban de descubrir!). Cuantos mas signos de exclamacion y mas expresivo
+  y emocionado suene, MEJOR. No olvides NUNCA el signo de apertura ¡ ni el de
   cierre !.
 {_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
