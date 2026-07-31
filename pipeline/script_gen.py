@@ -409,9 +409,9 @@ REQUISITOS:
 - La PRIMERA escena debe ser un GANCHO que enganche en los primeros 3 segundos.
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
-- En "text" NO uses COMAS (,). En lugar de comas, usa puntos para separar las
-  ideas, y aprovecha los signos de exclamacion (¡!) e interrogacion (¿?) para el
-  ritmo y la entonacion. SI debes conservar los acentos y la ortografia correcta.
+- En "text" escribe con PUNTUACION correcta y natural: usa PUNTOS para separar
+  las oraciones, y signos de exclamacion (¡!) e interrogacion (¿?) donde ayuden a
+  la entonacion. Conserva SIEMPRE los acentos y la ortografia correcta.
 {_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
@@ -493,9 +493,9 @@ REQUISITOS:
 - La PRIMERA escena debe ser un GANCHO que enganche en los primeros 3 segundos.
 - La ULTIMA escena debe cerrar con esta llamada a la accion (puedes adaptarla): "{cta}".
 - En "text" NO pongas emojis, ni hashtags, ni acotaciones. Solo lo que se narra.
-- En "text" NO uses COMAS (,). En lugar de comas, usa puntos para separar las
-  ideas, y aprovecha los signos de exclamacion (¡!) e interrogacion (¿?) para el
-  ritmo y la entonacion. SI debes conservar los acentos y la ortografia correcta.
+- En "text" escribe con PUNTUACION correcta y natural: usa PUNTOS para separar
+  las oraciones, y signos de exclamacion (¡!) e interrogacion (¿?) donde ayuden a
+  la entonacion. Conserva SIEMPRE los acentos y la ortografia correcta.
 {_persona_block(style_instructions)}{_director_block(hook_style, closer_style, emphasis_words)}{_podcast_block(podcast, speaker_a, speaker_b)}
 MUY IMPORTANTE sobre las imagenes (concordancia):
 - Para CADA escena, "image_prompt" debe describir EN INGLES, de forma visual y
