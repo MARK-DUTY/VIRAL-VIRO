@@ -67,20 +67,48 @@ def _reattach_punctuation(text: str, words: list[WordTiming]) -> list[WordTiming
     interrogacion, acentos), conservando su tiempo. Las comas ya no vienen en el
     texto (se quitaron antes), asi que los subtitulos quedan con todo MENOS comas.
 
-    Es a prueba de fallos: si el numero de palabras no coincide o la alineacion
-    se ve dudosa, dejamos las palabras tal cual (no arriesgamos romper nada).
+    ROBUSTO: a veces el motor de voz junta VARIAS palabras del texto en un solo
+    "tiempo" (ej: los numeros: "1999 pesos" llega como una sola pieza). Por eso
+    NO exigimos que los conteos coincidan: recorremos el texto original palabra
+    por palabra y a cada pieza de tiempo le asignamos TANTAS palabras del texto
+    como palabras tenga esa pieza. Asi la puntuacion queda bien colocada aunque
+    los numeros o las fechas se agrupen.
+
+    Es a prueba de fallos: si al final la alineacion se ve dudosa (las palabras
+    no cuadran), dejamos los subtitulos tal cual (no arriesgamos romper nada).
     """
     tokens = (text or "").split()
-    if not words or len(tokens) != len(words):
+    if not tokens or not words:
         return words
-    # Verificamos que de verdad esten alineadas (mismas palabras en el mismo orden).
-    matches = sum(1 for tk, w in zip(tokens, words) if _norm_word(tk) == _norm_word(w.word))
-    if matches < max(1, int(0.6 * len(words))):
+
+    result: list[WordTiming] = []
+    ti = 0                      # posicion en las palabras del texto original
+    ok = 0                      # cuantas piezas quedaron bien alineadas
+    total = 0
+    for w in words:
+        n = max(1, len((w.word or "").split()))   # cuantas palabras cubre este tiempo
+        chunk = tokens[ti : ti + n]
+        ti += n
+        if chunk:
+            display = " ".join(chunk)
+            total += 1
+            if _norm_word(display) == _norm_word(w.word):
+                ok += 1
+            result.append(WordTiming(word=display, start=w.start, end=w.end))
+        else:
+            result.append(w)
+
+    # Si sobraron palabras del texto (el motor junto de mas), las pegamos a la
+    # ultima pieza para no perder texto ni su puntuacion final.
+    if ti < len(tokens) and result:
+        last = result[-1]
+        extra = " ".join(tokens[ti:]).strip()
+        result[-1] = WordTiming(word=(last.word + " " + extra).strip(), start=last.start, end=last.end)
+
+    # Sanidad: si casi nada coincidio, la alineacion salio mal -> no tocamos nada.
+    if total and ok < max(1, int(0.6 * total)):
         return words
-    return [
-        WordTiming(word=tk, start=w.start, end=w.end)
-        for tk, w in zip(tokens, words)
-    ]
+    return result
 
 
 def _words_from_sentences(sentences: list[tuple[float, float, str]]) -> list[WordTiming]:
