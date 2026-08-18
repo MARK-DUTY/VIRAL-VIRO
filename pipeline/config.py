@@ -19,6 +19,22 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 
+# Groq retiro estos modelos para cuentas gratuitas/developer el 16-08-2026.
+# Muchos usuarios ya los tienen guardados en su .env, por lo que cambiar solo
+# el valor de ejemplo no basta: los migramos automaticamente a su reemplazo.
+_GROQ_MODEL_MIGRATIONS = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+}
+
+
+def _get_groq_model() -> str:
+    configured = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+    if not configured:
+        configured = "openai/gpt-oss-120b"
+    return _GROQ_MODEL_MIGRATIONS.get(configured, configured)
+
+
 def _get_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name, str(default)).strip().lower()
     return value in ("1", "true", "yes", "si", "sí", "on")
@@ -30,7 +46,7 @@ class Settings:
 
     # --- Claves de APIs ---
     groq_api_key: str = field(default_factory=lambda: os.getenv("GROQ_API_KEY", "").strip())
-    groq_model: str = field(default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip())
+    groq_model: str = field(default_factory=_get_groq_model)
     pexels_api_key: str = field(default_factory=lambda: os.getenv("PEXELS_API_KEY", "").strip())
     pixabay_api_key: str = field(default_factory=lambda: os.getenv("PIXABAY_API_KEY", "").strip())
     unsplash_access_key: str = field(default_factory=lambda: os.getenv("UNSPLASH_ACCESS_KEY", "").strip())
