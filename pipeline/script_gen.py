@@ -1,7 +1,7 @@
 """
 Paso 2 del pipeline: convertir el texto de la noticia en un GUION VIRAL.
 
-Usa la API de Groq (gratis) con un modelo Llama. Le pedimos que devuelva
+Usa la API de Groq (gratis). Le pedimos que devuelva
 un JSON dividido en ESCENAS. Cada escena trae:
   - text         : la parte del guion que se narra en esa escena
   - image_prompt : descripcion visual detallada (en ingles) para GENERAR la
@@ -32,6 +32,14 @@ from .article import Article
 from .config import settings
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Modelos de Groq que actualmente garantizan JSON Schema estricto mediante
+# constrained decoding. Para cualquier modelo personalizado conservamos el
+# modo JSON compatible y lo protegemos con reintentos.
+_STRICT_JSON_MODELS = {
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+}
 
 # Cuantas palabras caben aproximadamente segun la duracion (locucion ~2.6 pal/seg)
 _WORDS_PER_SECOND = 2.6
@@ -123,8 +131,10 @@ def _groq_translate_text(text: str) -> str | None:
         "model": settings.groq_model,
         "messages": messages,
         "temperature": 0.2,
-        "max_tokens": 40,
+        "max_completion_tokens": 80,
     }
+    if settings.groq_model.lower() in _STRICT_JSON_MODELS:
+        payload["reasoning_effort"] = "low"
     headers = {
         "Authorization": f"Bearer {settings.groq_api_key}",
         "Content-Type": "application/json",
@@ -627,6 +637,59 @@ def _extract_json(content: str) -> dict:
         raise
 
 
+def _script_response_format(podcast: bool = False) -> dict:
+    """JSON Schema estricto para el guion completo.
+
+    GPT-OSS 20B/120B soportan ``strict: true`` en Groq. Esto evita que Groq
+    descarte la respuesta con ``json_validate_failed`` antes de que llegue al
+    programa. En modo podcast, ``speaker`` tambien es obligatorio.
+    """
+    scene_properties = {
+        "text": {"type": "string"},
+        "image_prompt": {"type": "string"},
+        "keyword": {"type": "string"},
+    }
+    scene_required = ["text", "image_prompt", "keyword"]
+    if podcast:
+        scene_properties["speaker"] = {"type": "string", "enum": ["A", "B"]}
+        scene_required.append("speaker")
+
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "virofeed_video_script",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "scenes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": scene_properties,
+                            "required": scene_required,
+                            "additionalProperties": False,
+                        },
+                    },
+                    "titles": {"type": "array", "items": {"type": "string"}},
+                    "hashtags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["scenes", "titles", "hashtags"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+def _groq_error(resp) -> tuple[str, str]:
+    """Devuelve (codigo, mensaje) sin fallar si Groq responde texto no JSON."""
+    try:
+        error = resp.json().get("error", {})
+        return str(error.get("code") or ""), str(error.get("message") or "")
+    except Exception:  # noqa: BLE001
+        return "", (getattr(resp, "text", "") or "")
+
+
 def _retry_after_seconds(resp, default: float = 8.0) -> float:
     """
     Cuanto esperar antes de reintentar tras un 429 de Groq.
@@ -649,7 +712,12 @@ def _retry_after_seconds(resp, default: float = 8.0) -> float:
     return default
 
 
-def _call_groq(messages: list[dict], timeout: int = 60, max_tokens: int = 2500) -> dict:
+def _call_groq(
+    messages: list[dict],
+    timeout: int = 60,
+    max_tokens: int = 2500,
+    podcast: bool = False,
+) -> dict:
     """Envia los mensajes a Groq y devuelve el JSON ya parseado (dict).
 
     Si Groq responde 429 (limite gratis por minuto), ESPERAMOS lo que Groq
@@ -663,13 +731,21 @@ def _call_groq(messages: list[dict], timeout: int = 60, max_tokens: int = 2500) 
             "Consiguela gratis en https://console.groq.com"
         )
 
+    model = settings.groq_model.strip()
+    strict_json = model.lower() in _STRICT_JSON_MODELS
     payload = {
-        "model": settings.groq_model,
+        "model": model,
         "messages": messages,
-        "temperature": 0.8,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
+        "temperature": 0.4,
+        "max_completion_tokens": max_tokens,
+        "response_format": (
+            _script_response_format(podcast)
+            if strict_json
+            else {"type": "json_object"}
+        ),
     }
+    if strict_json:
+        payload["reasoning_effort"] = "low"
     headers = {
         "Authorization": f"Bearer {settings.groq_api_key}",
         "Content-Type": "application/json",
@@ -689,6 +765,21 @@ def _call_groq(messages: list[dict], timeout: int = 60, max_tokens: int = 2500) 
                   f"({attempt}/{max_attempts - 1})...")
             time.sleep(wait)
             continue
+        code, _message = _groq_error(resp)
+        if (
+            resp.status_code == 400
+            and code == "json_validate_failed"
+            and attempt < max_attempts
+        ):
+            # JSON Object Mode puede fallar ocasionalmente. Reintentamos con
+            # menos aleatoriedad en lugar de mandar al usuario a empezar otra vez.
+            payload["temperature"] = 0.2
+            print(
+                f"[guion] Groq genero JSON invalido. Reintento automatico "
+                f"({attempt}/{max_attempts - 1})..."
+            )
+            time.sleep(min(2.0, 0.5 * attempt))
+            continue
         break
 
     if resp.status_code == 401:
@@ -700,8 +791,16 @@ def _call_groq(messages: list[dict], timeout: int = 60, max_tokens: int = 2500) 
             "generado muchos videos hoy, puede ser el limite DIARIO: intenta mas tarde "
             "o crea otra clave gratis en https://console.groq.com y ponla en tu .env"
         )
+    code, message = _groq_error(resp)
+    if resp.status_code == 400 and code == "json_validate_failed":
+        raise ValueError(
+            "Groq no pudo entregar el guion en formato JSON despues de varios "
+            "intentos. El programa ya reintento automaticamente; vuelve a "
+            "generar en unos segundos."
+        )
     if resp.status_code >= 400:
-        raise ValueError(f"Groq devolvio un error {resp.status_code}: {resp.text[:300]}")
+        detail = message or resp.text[:300]
+        raise ValueError(f"Groq devolvio un error {resp.status_code}: {detail[:300]}")
 
     data = resp.json()
     content = data["choices"][0]["message"]["content"]
@@ -916,7 +1015,9 @@ def _fit_length_and_scenes(
             style_desc, cta, source_kind=source_kind,
         )
         try:
-            longer = _parse_script(_call_groq(messages, timeout=timeout, max_tokens=max_tokens))
+            longer = _parse_script(
+                _call_groq(messages, timeout=timeout, max_tokens=max_tokens, podcast=podcast)
+            )
         except Exception as exc:  # noqa: BLE001
             print(f"[guion] no pude expandir (intento {tries}): {exc}")
             break
@@ -985,7 +1086,9 @@ def generate_script(
         podcast=podcast, speaker_a=speaker_a, speaker_b=speaker_b,
         hook_style=hook_style, closer_style=closer_style, emphasis_words=emphasis_words,
     )
-    script = _parse_script(_call_groq(messages, timeout=timeout, max_tokens=max_tokens))
+    script = _parse_script(
+        _call_groq(messages, timeout=timeout, max_tokens=max_tokens, podcast=podcast)
+    )
 
     script = _fit_length_and_scenes(
         script,
@@ -1057,7 +1160,9 @@ def generate_script_from_story(
         podcast=podcast, speaker_a=speaker_a, speaker_b=speaker_b,
         hook_style=hook_style, closer_style=closer_style, emphasis_words=emphasis_words,
     )
-    script = _parse_script(_call_groq(messages, timeout=timeout, max_tokens=max_tokens))
+    script = _parse_script(
+        _call_groq(messages, timeout=timeout, max_tokens=max_tokens, podcast=podcast)
+    )
 
     script = _fit_length_and_scenes(
         script,
