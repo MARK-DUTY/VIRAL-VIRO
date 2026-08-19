@@ -19,6 +19,9 @@ assets/avatar.jpeg
 assets/avatar.png
 assets/logo.png
 
+# FFmpeg (se descarga solo en cada PC, no subir el binario pesado)
+ffmpeg/
+
 # Sistema
 .DS_Store
 Thumbs.db
